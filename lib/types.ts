@@ -89,3 +89,81 @@ export interface CategorizedSessions {
   previous7Days: ChatSession[]
   older: ChatSession[]
 }
+
+// ── Unified schema entities (scripts/003 + 004) ──────────────────────────────
+// The canonical types for the paper's data model. Use these when reading/
+// writing session, emotional_state, venting_interaction, therapist_convo,
+// biometric_reading, hardware_device, and safety_flag.
+export type StressLevel = 'low' | 'moderate' | 'high'
+export type SessionStatus = 'active' | 'completed' | 'abandoned'
+export type EmotionalStateSource = 'text' | 'biometric' | 'interaction' | 'fused'
+export type VentingInputType = 'tap' | 'drag' | 'text' | 'weapon_select'
+
+export interface Session {
+  id: string
+  user_id: string
+  start_time: string
+  end_time?: string | null
+  status: SessionStatus
+  created_at: string
+}
+
+export interface EmotionalState {
+  id: string
+  session_id: string
+  biometric_reading_id?: string | null
+  sentiment_score?: number | null
+  stress_level?: StressLevel | null
+  readiness_score?: number | null
+  signals_used?: string[] | null
+  using_stub_signals?: boolean
+  source: EmotionalStateSource
+  recorded_at: string
+}
+
+export interface VentingInteraction {
+  id: string
+  session_id: string
+  input_type: VentingInputType
+  intensity_score: number
+  target_label?: string | null
+  recorded_at: string
+}
+
+export interface TherapistConvo {
+  id: string
+  session_id: string
+  sender: 'user' | 'assistant'
+  msg_text: string
+  emotion_label?: string | null
+  created_at: string
+}
+
+export interface BiometricReading {
+  id: string
+  session_id: string
+  device_id?: string | null
+  heart_rate?: number | null
+  grip_pressure?: number | null
+  stress_class?: StressLevel | null
+  recorded_at: string
+}
+
+export interface HardwareDevice {
+  id: string
+  user_id?: string | null
+  device_label?: string | null
+  sensor_type: 'pulse' | 'fsr' | 'combined'
+  firmware_version?: string | null
+  last_calibrated?: string | null
+  created_at: string
+}
+
+export interface SafetyFlag {
+  id: string
+  session_id: string
+  trigger_type: string
+  severity: 'low' | 'medium' | 'high'
+  source_text?: string | null
+  created_at: string
+}

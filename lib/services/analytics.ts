@@ -88,22 +88,26 @@ export async function getUserMoodAnalytics(
         mood: dayLogs[0].dominant_emotion || 'neutral',
       })
     } else {
-      weeklyMoodTrend.push({
-        day: dayStr,
-        anger: Math.max(20, 50 - i * 3),
-        stress: Math.max(15, 45 - i * 2),
-        mood: i % 2 === 0 ? 'calm' : 'neutral',
-      })
+      // No logs this day — record zeros rather than inventing a declining trend.
+      weeklyMoodTrend.push({ day: dayStr, anger: 0, stress: 0, mood: 'no data' })
     }
   }
 
-  // Monthly trend (last 4 weeks)
-  const monthlyMoodTrend = [
-    { week: 'Week 1', anger: 65, stress: 70 },
-    { week: 'Week 2', anger: 55, stress: 58 },
-    { week: 'Week 3', anger: 42, stress: 45 },
-    { week: 'Week 4', anger: 30, stress: 35 },
-  ]
+  // Monthly trend (last 4 weeks) — computed from real mood logs, not invented.
+  const monthlyMoodTrend: { week: string; anger: number; stress: number }[] = []
+  for (let w = 3; w >= 0; w--) {
+    const weekEnd = now.getTime() - w * 7 * 24 * 60 * 60 * 1000
+    const weekStart = weekEnd - 7 * 24 * 60 * 60 * 1000
+    const weekLogs = moodLogs.filter((log) => {
+      const t = new Date(log.created_at).getTime()
+      return t >= weekStart && t < weekEnd
+    })
+    monthlyMoodTrend.push({
+      week: `Week ${4 - w}`,
+      anger: weekLogs.length ? Math.round(weekLogs.reduce((s, l) => s + l.anger_level, 0) / weekLogs.length) : 0,
+      stress: weekLogs.length ? Math.round(weekLogs.reduce((s, l) => s + l.stress_level, 0) / weekLogs.length) : 0,
+    })
+  }
 
   // Triggers breakdown
   const triggerMap: Record<string, number> = {}
@@ -117,28 +121,31 @@ export async function getUserMoodAnalytics(
     count,
   }))
 
-  if (commonTriggers.length === 0) {
-    commonTriggers.push(
-      { trigger: 'Work Deadlines & Meetings', count: 8 },
-      { trigger: 'Family & Relationship Stress', count: 5 },
-      { trigger: 'Exams & Academic Pressure', count: 4 },
-      { trigger: 'Sleep Deprivation', count: 3 }
-    )
-  }
+  // (No fabricated fallback triggers — commonTriggers reflects real user_memories only.)
 
-  // Calculate averages and stats
+  // Calculate averages and stats — honest zeros when there's no data yet.
   const averageAnger = chatSessions.length > 0
-    ? Math.round(chatSessions.reduce((acc, s) => acc + (s.anger_level || 50), 0) / chatSessions.length)
-    : 35
+    ? Math.round(chatSessions.reduce((acc, s) => acc + (s.anger_level || 0), 0) / chatSessions.length)
+    : 0
 
   const averageStress = chatSessions.length > 0
-    ? Math.round(chatSessions.reduce((acc, s) => acc + (s.stress_level || 50), 0) / chatSessions.length)
-    : 40
+    ? Math.round(chatSessions.reduce((acc, s) => acc + (s.stress_level || 0), 0) / chatSessions.length)
+    : 0
 
-  const emotionalImprovement = Math.min(100, Math.max(15, Math.round(100 - (averageAnger + averageStress) / 2)))
+  // Real improvement = the drop in distress from the earliest to the latest
+  // session (chatSessions is newest-first). Needs >=2 sessions to mean anything.
+  const emotionalImprovement = chatSessions.length >= 2
+    ? (() => {
+        const newest = chatSessions[0]
+        const oldest = chatSessions[chatSessions.length - 1]
+        const oldDistress = ((oldest.anger_level || 0) + (oldest.stress_level || 0)) / 2
+        const newDistress = ((newest.anger_level || 0) + (newest.stress_level || 0)) / 2
+        return Math.max(0, Math.round(oldDistress - newDistress))
+      })()
+    : 0
 
   const currentMood: EmotionType = (chatSessions[0]?.mood as EmotionType) || 'neutral'
-  const mostCommonTrigger = commonTriggers[0]?.trigger || 'Work Stress'
+  const mostCommonTrigger = commonTriggers[0]?.trigger || 'None yet'
 
   return {
     weeklyMoodTrend,

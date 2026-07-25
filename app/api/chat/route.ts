@@ -130,9 +130,10 @@ export async function POST(req: Request) {
           .limit(10),
       ])
 
-      const ventingIntensities = (ventRows ?? []).map((r: any) => Number(r.intensity_score))
+      const ventingIntensities = (ventRows ?? []).map((r: { intensity_score: number }) => Number(r.intensity_score))
       const biometricStressScores = (bioRows ?? []).map(
-        (r: any) => classifyBiometrics(r.heart_rate, r.grip_pressure).stressScore,
+        (r: { heart_rate: number | null; grip_pressure: number | null }) =>
+          classifyBiometrics(r.heart_rate, r.grip_pressure).stressScore,
       )
       const sessionDurationSeconds = sessionRow?.start_time
         ? (Date.now() - new Date(sessionRow.start_time).getTime()) / 1000
