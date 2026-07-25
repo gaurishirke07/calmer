@@ -48,18 +48,6 @@ export interface UserMemory {
   updated_at: string
 }
 
-export interface MoodLog {
-  id: string
-  user_id: string
-  chat_session_id?: string | null
-  dominant_emotion: EmotionType
-  anger_level: number
-  stress_level: number
-  trigger_source?: string | null
-  notes?: string | null
-  created_at: string
-}
-
 export interface SessionSummary {
   mood: EmotionType
   anger_level: number

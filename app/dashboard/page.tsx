@@ -31,25 +31,44 @@ export default async function DashboardPage() {
       .select('id, created_at, venting_interaction(count)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
-      .limit(10),
+      .limit(20),
     supabase
-      .from('chat_sessions')
-      .select('*, chat_messages(count)')
+      .from('session')
+      .select('id, title, mood, created_at, updated_at, therapist_convo(count)')
       .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(10),
+      .order('updated_at', { ascending: false })
+      .limit(20),
     getUserMoodAnalytics(supabase, user.id),
   ])
 
   const displayName = profileResult.data?.display_name || user.email?.split('@')[0] || 'Friend'
-  const gameSessions = (ventSessionsResult.data ?? []).map(
-    (s: { id: string; created_at: string; venting_interaction?: { count: number }[] }) => ({
+  // Only sessions where the user actually vented show as "rage room" history —
+  // chat-only sessions (0 interactions) belong in Recent Chat Conversations.
+  const gameSessions = (ventSessionsResult.data ?? [])
+    .map((s: { id: string; created_at: string; venting_interaction?: { count: number }[] }) => ({
       id: s.id,
       created_at: s.created_at,
       interactions: s.venting_interaction?.[0]?.count ?? 0,
-    }),
-  )
-  const chatSessions = chatSessionsResult.data || []
+    }))
+    .filter((s) => s.interactions > 0)
+    .slice(0, 10)
+  // Only sessions that actually have chat show in "Recent Chat Conversations".
+  const chatSessions = ((chatSessionsResult.data ?? []) as {
+    id: string
+    title: string | null
+    mood: string | null
+    created_at: string
+    therapist_convo?: { count: number }[]
+  }[])
+    .filter((s) => (s.therapist_convo?.[0]?.count ?? 0) > 0)
+    .slice(0, 10)
+    .map((s) => ({
+      id: s.id,
+      created_at: s.created_at,
+      title: s.title ?? undefined,
+      mood: s.mood ?? undefined,
+      chat_messages: s.therapist_convo ?? [],
+    }))
   const totalChatSessions = analytics.totalSessions
 
   return (

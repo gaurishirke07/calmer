@@ -10,11 +10,14 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const [sessions, messages, memories, moodLogs] = await Promise.all([
-      supabase.from('chat_sessions').select('*').eq('user_id', user.id),
-      supabase.from('chat_messages').select('*').eq('user_id', user.id),
+    // Unified schema export. therapist_convo / emotional_state / venting_interaction
+    // have no user_id column — RLS scopes them to this user via session ownership.
+    const [sessions, conversations, emotionalStates, ventingInteractions, memories] = await Promise.all([
+      supabase.from('session').select('*').eq('user_id', user.id),
+      supabase.from('therapist_convo').select('*'),
+      supabase.from('emotional_state').select('*'),
+      supabase.from('venting_interaction').select('*'),
       supabase.from('user_memories').select('*').eq('user_id', user.id),
-      supabase.from('mood_logs').select('*').eq('user_id', user.id),
     ])
 
     const exportData = {
@@ -24,9 +27,10 @@ export async function GET() {
         exported_at: new Date().toISOString(),
       },
       sessions: sessions.data || [],
-      messages: messages.data || [],
+      conversations: conversations.data || [],
+      emotionalStates: emotionalStates.data || [],
+      ventingInteractions: ventingInteractions.data || [],
       memories: memories.data || [],
-      moodLogs: moodLogs.data || [],
     }
 
     return new Response(JSON.stringify(exportData, null, 2), {

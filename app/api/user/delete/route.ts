@@ -10,12 +10,12 @@ export async function DELETE() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Delete user data from all tables
+    // Delete user data. Deleting the session cascades to therapist_convo /
+    // emotional_state / venting_interaction / biometric_reading / safety_flag.
     await Promise.all([
-      supabase.from('chat_messages').delete().eq('user_id', user.id),
-      supabase.from('chat_sessions').delete().eq('user_id', user.id),
+      supabase.from('session').delete().eq('user_id', user.id),
+      supabase.from('hardware_device').delete().eq('user_id', user.id),
       supabase.from('user_memories').delete().eq('user_id', user.id),
-      supabase.from('mood_logs').delete().eq('user_id', user.id),
       supabase.from('profiles').delete().eq('id', user.id),
     ])
 

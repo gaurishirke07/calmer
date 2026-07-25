@@ -2,7 +2,6 @@ import { streamText, convertToModelMessages } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createClient } from '@/lib/supabase/server'
 import { getUserMemories, formatMemoriesForPrompt, autoExtractMemoriesFromMessage } from '@/lib/services/memory'
-import { detectEmotion } from '@/lib/services/emotion'
 import { classifyEmotion } from '@/lib/calmer/emotion-classifier'
 import {
   computeReadinessScore,
@@ -15,11 +14,8 @@ export const runtime = 'nodejs'
 
 // ── Model choice ─────────────────────────────────────────────────────────
 // Llama-3.3-70B via Groq's OpenAI-compatible API (drop-in for the ai-sdk
-// OpenAI client). Same open-weight, citable model (Llama 3 technical report),
-// but Groq serves it on a free tier with NO Meta-licence gate and NO inference
-// credits, at the fastest hosted speed available (LPU, ~700 tok/s) — which
-// keeps the demo snappy. Free-tier caps (~1,000 req/day) are ample for dev.
-// Override with CALMER_CHAT_MODEL to A/B a different model without code changes.
+// OpenAI client). Same open-weight, citable model, served free/fast with no
+// Meta-licence gate. Override with CALMER_CHAT_MODEL (must be a Groq model id).
 const DEFAULT_MODEL = 'llama-3.3-70b-versatile'
 
 export async function POST(req: Request) {
@@ -38,12 +34,10 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json()
-    // sessionId       -> legacy chat_sessions row (drives sidebar / history / memory)
-    // calmerSessionId -> unified `session` row shared with the rage room, so the
-    //                    readiness score can FUSE this message's sentiment with the
-    //                    same session's venting + biometric history (Novelty #1).
-    const { messages, sessionId } = body
-    const calmerSessionId: string | null = body.calmerSessionId ?? body.session_id ?? null
+    const { messages } = body
+    // One unified `session` id drives everything now (history, fusion, summary).
+    // `calmerSessionId` is still accepted for backward-compat with the game handoff.
+    const sessionId: string | null = body.sessionId ?? body.calmerSessionId ?? null
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return new Response('Messages array is required', { status: 400 })
@@ -65,39 +59,41 @@ export async function POST(req: Request) {
       }
     }
 
-    // ── Legacy persistence (v1) — keeps sidebar / history / mood analytics working.
-    // detectEmotion is the older keyword stub in lib/services/emotion.ts; it feeds
-    // only the legacy mood_logs. The unified research layer below uses the real
-    // classifier instead. (Reconciling these two paths is Phase 6 hygiene.)
-    const { emotion, angerLevel, stressLevel: legacyStress } = detectEmotion(userText)
-    if (sessionId && userText) {
-      await supabase.from('chat_messages').insert({
-        chat_session_id: sessionId,
-        user_id: user.id,
-        role: 'user',
-        content: userText,
-        emotion,
-      })
-      await supabase.from('mood_logs').insert({
-        user_id: user.id,
-        chat_session_id: sessionId,
-        dominant_emotion: emotion,
-        anger_level: angerLevel,
-        stress_level: legacyStress,
-      })
+    // Persistent-companion memory extraction (user_memories — kept feature).
+    if (userText) {
       await autoExtractMemoriesFromMessage(supabase, user.id, userText)
     }
 
-    // ── Unified research layer (Novelty #1) — safety flag + fused readiness.
-    if (calmerSessionId && userText) {
-      // Safety-flag STUB (keyword list) — wired end-to-end so the SAFETY_FLAG
-      // pathway is demonstrable, but NOT a real crisis detector. Replacing it
-      // with a layered classifier+LLM check is Phase 3 (T4.1); do not present
-      // this keyword match as the safety mechanism.
+    // ── Unified layer: persistence + fused readiness (Novelty #1) ──────────
+    let previousSummaryText = ''
+    if (sessionId && userText) {
+      // Pull the session + this session's venting/biometric history in one round.
+      const [{ data: sessionRow }, { data: ventRows }, { data: bioRows }] = await Promise.all([
+        supabase.from('session').select('start_time, title, summary').eq('id', sessionId).maybeSingle(),
+        supabase
+          .from('venting_interaction')
+          .select('intensity_score, recorded_at')
+          .eq('session_id', sessionId)
+          .order('recorded_at', { ascending: true })
+          .limit(20),
+        supabase
+          .from('biometric_reading')
+          .select('heart_rate, grip_pressure, recorded_at')
+          .eq('session_id', sessionId)
+          .order('recorded_at', { ascending: true })
+          .limit(10),
+      ])
+
+      if (sessionRow?.summary) {
+        previousSummaryText = `Previous Session Summary:\n${sessionRow.summary}\n`
+      }
+
+      // Safety-flag STUB (keyword list) — wired so the SAFETY_FLAG pathway is
+      // demonstrable; NOT a real crisis detector (layered detection is P3).
       const flag = detectSafetyTrigger(userText)
       if (flag.triggered) {
         const { error } = await supabase.from('safety_flag').insert({
-          session_id: calmerSessionId,
+          session_id: sessionId,
           trigger_type: flag.triggerType,
           severity: flag.severity,
           source_text: userText.slice(0, 500),
@@ -105,30 +101,11 @@ export async function POST(req: Request) {
         if (error) console.error('[chat] failed to log safety_flag:', error.message)
       }
 
-      // Real classifier first, lexicon stub only on failure — and record which
-      // one actually ran so stub-derived rows stay honestly labelled.
+      // Real classifier first, lexicon stub only on failure — record which ran.
       const classification = await classifyEmotion(userText)
       const sentiment = classification?.sentimentScore ?? stubTextSentiment(userText)
       const usingStubSentiment = classification === null
-      const emotionLabel = classification?.label ?? emotion
-
-      // Cross-session fusion: pull THIS session's venting + biometric history so
-      // the chat-side readiness score is not sentiment-alone.
-      const [{ data: sessionRow }, { data: ventRows }, { data: bioRows }] = await Promise.all([
-        supabase.from('session').select('start_time').eq('id', calmerSessionId).maybeSingle(),
-        supabase
-          .from('venting_interaction')
-          .select('intensity_score, recorded_at')
-          .eq('session_id', calmerSessionId)
-          .order('recorded_at', { ascending: true })
-          .limit(20),
-        supabase
-          .from('biometric_reading')
-          .select('heart_rate, grip_pressure, recorded_at')
-          .eq('session_id', calmerSessionId)
-          .order('recorded_at', { ascending: true })
-          .limit(10),
-      ])
+      const emotionLabel = classification?.label ?? 'neutral'
 
       const ventingIntensities = (ventRows ?? []).map((r: { intensity_score: number }) => Number(r.intensity_score))
       const biometricStressScores = (bioRows ?? []).map(
@@ -146,19 +123,17 @@ export async function POST(req: Request) {
         sessionDurationSeconds,
         usingStubSentiment,
       })
-
-      // source is 'fused' when more than the text signal contributed, else 'text'
       const source = signalsUsed.length > 1 ? 'fused' : 'text'
 
       const [{ error: convoErr }, { error: stateErr }] = await Promise.all([
         supabase.from('therapist_convo').insert({
-          session_id: calmerSessionId,
+          session_id: sessionId,
           sender: 'user',
           msg_text: userText,
           emotion_label: emotionLabel,
         }),
         supabase.from('emotional_state').insert({
-          session_id: calmerSessionId,
+          session_id: sessionId,
           sentiment_score: sentiment,
           readiness_score: readinessScore,
           stress_level: stressLevel,
@@ -169,23 +144,20 @@ export async function POST(req: Request) {
       ])
       if (convoErr) console.error('[chat] failed to save therapist_convo user row:', convoErr.message)
       if (stateErr) console.error('[chat] failed to update emotional_state:', stateErr.message)
+
+      // Keep the session fresh + titled + mood-tagged for the sidebar/dashboard.
+      const sessionUpdate: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+        mood: emotionLabel,
+      }
+      if (!sessionRow?.title) sessionUpdate.title = userText.slice(0, 40)
+      const { error: updErr } = await supabase.from('session').update(sessionUpdate).eq('id', sessionId)
+      if (updErr) console.error('[chat] failed to update session:', updErr.message)
     }
 
-    // Load memories & previous summary for the system prompt (v1 behavior)
+    // Load memories for the system prompt
     const userMemories = await getUserMemories(supabase, user.id)
     const formattedMemories = formatMemoriesForPrompt(userMemories)
-
-    let previousSummaryText = ''
-    if (sessionId) {
-      const { data: currentSession } = await supabase
-        .from('chat_sessions')
-        .select('summary')
-        .eq('id', sessionId)
-        .single()
-      if (currentSession?.summary) {
-        previousSummaryText = `Previous Session Summary:\n${currentSession.summary}\n`
-      }
-    }
 
     // Limit to last 10 messages for token economy / relevance
     const recentMessages = messages.slice(-10)
@@ -216,13 +188,14 @@ Guidelines:
       system: systemPrompt,
       messages: await convertToModelMessages(recentMessages),
       onFinish: async ({ text }) => {
-        if (!calmerSessionId || !text) return
+        if (!sessionId || !text) return
         const { error } = await supabase.from('therapist_convo').insert({
-          session_id: calmerSessionId,
+          session_id: sessionId,
           sender: 'assistant',
           msg_text: text,
         })
         if (error) console.error('[chat] failed to save therapist_convo assistant row:', error.message)
+        await supabase.from('session').update({ updated_at: new Date().toISOString() }).eq('id', sessionId)
       },
     })
 

@@ -39,12 +39,16 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
   const { messages, sendMessage, status, setMessages } = useChat({
     transport: new DefaultChatTransport({
       api: '/api/chat',
-      // sessionId       -> legacy chat_sessions row (sidebar/history/memory)
-      // calmerSessionId -> unified `session` shared with the rage room, so the
-      //                    server can fuse venting history into readiness.
-      body: { sessionId, calmerSessionId },
+      // One unified `session` id drives history + fusion + summary.
+      body: { sessionId },
     }),
   })
+
+  // Initialise from the rage-room handoff (?session=<uuid>) so chat continues
+  // the SAME unified session the venting happened in.
+  useEffect(() => {
+    if (calmerSessionId) setSessionId(calmerSessionId)
+  }, [calmerSessionId])
 
   const isStreaming = status === 'streaming'
   const isSubmitting = status === 'submitted'
@@ -76,25 +80,11 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
     loadSessions()
   }, [loadSessions])
 
-  // Create new session if none active
-  const handleNewChat = async () => {
-    try {
-      const res = await fetch('/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'New Conversation' }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        if (data.session) {
-          setSessionId(data.session.id)
-          setMessages([])
-          await loadSessions()
-        }
-      }
-    } catch (err) {
-      console.error('Error creating chat session:', err)
-    }
+  // New chat = blank slate. The unified `session` row is created lazily on the
+  // first message (see handleSubmit), so no empty sessions are left behind.
+  const handleNewChat = () => {
+    setSessionId(null)
+    setMessages([])
   }
 
   // Select existing session
@@ -167,20 +157,23 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
       const res = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: input.trim().slice(0, 30) }),
+        body: JSON.stringify({ title: input.trim().slice(0, 40) }),
       })
       if (res.ok) {
         const data = await res.json()
         if (data.session) {
           currentSessionId = data.session.id
           setSessionId(currentSessionId)
-          await loadSessions()
         }
       }
     }
 
-    sendMessage({ text: input.trim() })
+    const text = input.trim()
     setInput('')
+    // Pass the id explicitly so the very first message isn't lost to a stale
+    // transport body (setSessionId hasn't propagated on this tick yet).
+    sendMessage({ text }, currentSessionId ? { body: { sessionId: currentSessionId } } : undefined)
+    loadSessions()
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
