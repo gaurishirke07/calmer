@@ -9,10 +9,7 @@ import { MoodAnalytics } from '@/components/analytics/mood-analytics'
 interface GameSession {
   id: string
   created_at: string
-  score: number
-  targets_destroyed: number
-  duration_seconds: number
-  intensity_level: number
+  interactions: number
 }
 
 interface ChatSession {
@@ -28,11 +25,7 @@ interface DashboardContentProps {
   gameSessions: GameSession[]
   chatSessions: ChatSession[]
   stats: {
-    totalGameSessions: number
     totalChatSessions: number
-    totalScore: number
-    totalDestroyed: number
-    avgIntensity: number
     currentMood: string
     avgAnger: number
     avgStress: number
@@ -172,13 +165,11 @@ export function DashboardContent({
                   >
                     <div>
                       <p className="text-sm font-medium">{formatDate(session.created_at)}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {session.targets_destroyed} targets destroyed
-                      </p>
+                      <p className="text-xs text-muted-foreground">Rage room session</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-lg font-bold text-accent">{session.score}</p>
-                      <p className="text-xs text-muted-foreground">points</p>
+                      <p className="text-lg font-bold text-accent">{session.interactions}</p>
+                      <p className="text-xs text-muted-foreground">interactions</p>
                     </div>
                   </div>
                 ))}

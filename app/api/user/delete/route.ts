@@ -14,7 +14,6 @@ export async function DELETE() {
     await Promise.all([
       supabase.from('chat_messages').delete().eq('user_id', user.id),
       supabase.from('chat_sessions').delete().eq('user_id', user.id),
-      supabase.from('game_sessions').delete().eq('user_id', user.id),
       supabase.from('user_memories').delete().eq('user_id', user.id),
       supabase.from('mood_logs').delete().eq('user_id', user.id),
       supabase.from('profiles').delete().eq('id', user.id),
