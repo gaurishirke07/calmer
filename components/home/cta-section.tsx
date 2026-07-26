@@ -86,7 +86,7 @@ export function CTASection() {
               <ul className="space-y-2 text-xs text-muted-foreground/80">
                 <li><span className="cursor-pointer transition-colors hover:text-primary">Privacy Policy</span></li>
                 <li><span className="cursor-pointer transition-colors hover:text-primary">Terms of Service</span></li>
-                <li><span className="cursor-pointer transition-colors hover:text-primary">Crisis Support (988)</span></li>
+                <li><span className="cursor-pointer transition-colors hover:text-primary">Crisis Support: Tele-MANAS 14416</span></li>
               </ul>
             </div>
 

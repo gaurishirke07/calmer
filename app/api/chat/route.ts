@@ -1,4 +1,4 @@
-import { streamText, convertToModelMessages } from 'ai'
+import { streamText, convertToModelMessages, generateText } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createClient } from '@/lib/supabase/server'
 import { getUserMemories, formatMemoriesForPrompt, autoExtractMemoriesFromMessage } from '@/lib/services/memory'
@@ -9,6 +9,7 @@ import {
   detectSafetyTrigger,
   stubTextSentiment,
 } from '@/lib/calmer/readiness'
+import { SAFETY_CLASSIFIER_SYSTEM, SAFETY_MODE_SYSTEM, combineRisk, type RiskLevel } from '@/lib/calmer/safety'
 
 export const runtime = 'nodejs'
 
@@ -59,6 +60,33 @@ export async function POST(req: Request) {
       }
     }
 
+    const groq = createOpenAI({
+      baseURL: 'https://api.groq.com/openai/v1',
+      apiKey: process.env.GROQ_API_KEY,
+    })
+    const modelId = process.env.CALMER_CHAT_MODEL || DEFAULT_MODEL
+
+    // ── Safety gate: fast keyword pre-filter + an LLM risk check on every
+    // message (layered, conservative — takes the higher signal). HIGH risk
+    // switches the reply into safety mode and logs a flag. [Pichowicz 2025]
+    let risk: RiskLevel = 'none'
+    if (userText) {
+      const keywordFlag = detectSafetyTrigger(userText)
+      let verdict: string | null = null
+      try {
+        const { text } = await generateText({
+          model: groq(modelId),
+          system: SAFETY_CLASSIFIER_SYSTEM,
+          prompt: userText,
+        })
+        verdict = text
+      } catch (e) {
+        console.warn('[chat] safety LLM check failed, using keyword filter only:', (e as Error).message)
+      }
+      risk = combineRisk(keywordFlag.triggered, verdict)
+    }
+    const safetyMode = risk === 'high'
+
     // Persistent-companion memory extraction (user_memories — kept feature).
     if (userText) {
       await autoExtractMemoriesFromMessage(supabase, user.id, userText)
@@ -88,14 +116,12 @@ export async function POST(req: Request) {
         previousSummaryText = `Previous Session Summary:\n${sessionRow.summary}\n`
       }
 
-      // Safety-flag STUB (keyword list) — wired so the SAFETY_FLAG pathway is
-      // demonstrable; NOT a real crisis detector (layered detection is P3).
-      const flag = detectSafetyTrigger(userText)
-      if (flag.triggered) {
+      // Log the layered-safety result (computed above) against this session.
+      if (risk !== 'none') {
         const { error } = await supabase.from('safety_flag').insert({
           session_id: sessionId,
-          trigger_type: flag.triggerType,
-          severity: flag.severity,
+          trigger_type: 'self_harm_risk',
+          severity: risk === 'high' ? 'high' : 'low',
           source_text: userText.slice(0, 500),
         })
         if (error) console.error('[chat] failed to log safety_flag:', error.message)
@@ -162,13 +188,10 @@ export async function POST(req: Request) {
     // Limit to last 10 messages for token economy / relevance
     const recentMessages = messages.slice(-10)
 
-    const groq = createOpenAI({
-      baseURL: 'https://api.groq.com/openai/v1',
-      apiKey: process.env.GROQ_API_KEY,
-    })
-    const modelId = process.env.CALMER_CHAT_MODEL || DEFAULT_MODEL
-
-    const systemPrompt = `You are CALMER's AI Therapist & Persistent Companion, a compassionate and empathetic mental health guide.
+    // On HIGH risk, replace normal therapy with the safety-mode reply.
+    const systemPrompt = safetyMode
+      ? SAFETY_MODE_SYSTEM
+      : `You are CALMER's AI Therapist & Persistent Companion, a compassionate and empathetic mental health guide.
 
 ${formattedMemories}
 

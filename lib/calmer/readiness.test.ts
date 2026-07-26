@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { computeReadinessScore, classifyBiometrics, computeRMSSD } from './readiness'
+import { combineRisk } from './safety'
 
 describe('computeReadinessScore', () => {
   it('returns a neutral moderate score when no signals are present', () => {
@@ -97,5 +98,26 @@ describe('computeRMSSD', () => {
   it('computes the root-mean-square of successive differences', () => {
     // diffs: +50, -50 -> squares 2500, 2500 -> mean 2500 -> sqrt = 50
     expect(computeRMSSD([800, 850, 800])).toBeCloseTo(50, 5)
+  })
+})
+
+describe('combineRisk (layered safety)', () => {
+  it('escalates to high on a keyword hit regardless of the LLM verdict', () => {
+    expect(combineRisk(true, 'NONE')).toBe('high')
+    expect(combineRisk(true, null)).toBe('high')
+  })
+
+  it('honours an LLM HIGH verdict (case/whitespace-insensitive)', () => {
+    expect(combineRisk(false, 'HIGH')).toBe('high')
+    expect(combineRisk(false, ' high\n')).toBe('high')
+  })
+
+  it('is low only when the LLM says LOW and no keyword fired', () => {
+    expect(combineRisk(false, 'LOW')).toBe('low')
+  })
+
+  it('is none for ordinary messages', () => {
+    expect(combineRisk(false, 'NONE')).toBe('none')
+    expect(combineRisk(false, null)).toBe('none')
   })
 })

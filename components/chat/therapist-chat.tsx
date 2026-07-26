@@ -339,7 +339,7 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
           </form>
           <p className="mt-2 text-center text-xs text-muted-foreground">
             This is an AI companion, not a substitute for professional therapy. 
-            In crisis? Call 988 (Suicide & Crisis Lifeline)
+            In crisis? Call Tele-MANAS 14416 — India's free 24×7 mental health helpline
           </p>
         </div>
       </div>
