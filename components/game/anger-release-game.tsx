@@ -45,6 +45,16 @@ interface RagdollBone {
 const W=960,H=560,FLOOR_Y=H-80,CEIL_Y=52
 const VX=W/2,VY=CEIL_Y-30
 
+// ── Structured-venting parameters (JITAI decision rule) ─────────────────────
+// The venting phase is symbolic + TIME-LIMITED: after MAX_VENT_SECONDS the app
+// steers to reflection regardless of state (the enforced fast handoff). The
+// early handoff is the *decision point*; CALM_THRESHOLD is the tunable
+// *decision-rule* parameter (calm-enough = a *state of receptivity*).
+// [Nahum-Shani et al. 2018 (JITAI); Kjærvik & Bushman 2024]
+const MAX_VENT_SECONDS = 120        // hard cap on the venting phase
+const CALM_THRESHOLD = 0.66         // readiness at which reflection is offered
+const TIMER_HANDOFF_SECONDS = 60    // control arm: offer at a fixed time instead
+
 // ── Safe helpers ───────────────────────────────────────────────────────────────
 const safeR = (r:number)=>Math.max(0.01,r)
 function safeGrad(ctx:CanvasRenderingContext2D,x:number,y:number,r0:number,r1:number){
@@ -201,6 +211,8 @@ export function AngerReleaseGame(){
   // reactive copy of sessionIdRef for the handoff <Link> (refs aren't safe to
   // read during render); set once the unified session is created
   const[handoffSessionId,setHandoffSessionId]=useState<string|null>(null)
+  // score-driven handoff prompt (shown once calm-enough / control time reached)
+  const[showHandoff,setShowHandoff]=useState(false)
   const[theme,setTheme]=useState<RoomTheme>('classroom')
   const[showThemePicker,setShowThemePicker]=useState(false)
   const[buddyName,setBuddyName]=useState('BUDDY')
@@ -236,6 +248,10 @@ export function AngerReleaseGame(){
   const pendingInteractionsRef=useRef<{input_type:'tap'|'drag';intensity_score:number;target_label:string}[]>([])
   const intensityHistoryRef=useRef<number[]>([])
   const flushTimerRef  =useRef<ReturnType<typeof setInterval>|null>(null)
+  // MRT hook: which decision rule offers the handoff this session — 'readiness'
+  // (score crosses CALM_THRESHOLD) vs 'timer' (fixed-time control). Randomised
+  // per session + logged, so the transition rule can be evaluated. [Klasnja 2015]
+  const handoffConditionRef=useRef<'readiness'|'timer'>('readiness')
 
   useEffect(()=>{weaponRef.current=weapon},[weapon])
   useEffect(()=>{ammoRef.current=ammo},[ammo])
@@ -902,7 +918,7 @@ export function AngerReleaseGame(){
     const supabase=createClient()
     const{data:{user}}=await supabase.auth.getUser()
     if(!user)return null
-    const{data,error}=await supabase.from('session').insert({user_id:user.id,status:'active'}).select('id').single()
+    const{data,error}=await supabase.from('session').insert({user_id:user.id,status:'active',mrt_condition:handoffConditionRef.current}).select('id').single()
     if(error){console.error('[game] failed to create unified session:',error.message);return null}
     return data.id as string
   },[])
@@ -926,6 +942,8 @@ export function AngerReleaseGame(){
       sessionDurationSeconds:(Date.now()-gameStartTimeRef.current)/1000,
     })
     setReadiness(readinessScore)
+    // score-driven decision point: offer reflection once calm-enough
+    if(handoffConditionRef.current==='readiness'&&readinessScore>=CALM_THRESHOLD)setShowHandoff(true)
     const{error:stateError}=await supabase.from('emotional_state').insert({
       session_id:sid,
       readiness_score:readinessScore,
@@ -940,7 +958,7 @@ export function AngerReleaseGame(){
   const startGame=useCallback(async(th:RoomTheme=theme)=>{
     setScore(0);scoreRef.current=0
     setDestroyed(0);destroyRef.current=0
-    setTimeLeft(120)
+    setTimeLeft(MAX_VENT_SECONDS)
     setAmmo({gun:30,shotgun:12,grenade:6,molotov:4,chainsaw:100})
     ammoRef.current={gun:30,shotgun:12,grenade:6,molotov:4,chainsaw:100}
     setBuddyHp(100)
@@ -959,6 +977,9 @@ export function AngerReleaseGame(){
     intensityHistoryRef.current=[]
     setReadiness(0.5)
     setHandoffSessionId(null)
+    setShowHandoff(false)
+    // randomise the handoff decision rule for this session (MRT hook)
+    handoffConditionRef.current = Math.random() < 0.5 ? 'readiness' : 'timer'
 
     setPhase('playing');phaseRef.current='playing'
 
@@ -991,6 +1012,13 @@ export function AngerReleaseGame(){
     }),1000)
     return()=>clearInterval(t)
   },[phase])
+
+  // Control arm: offer the handoff at a fixed elapsed time (the readiness arm
+  // offers it when the score crosses CALM_THRESHOLD, in flushVentingInteractions).
+  useEffect(()=>{
+    if(phase!=='playing')return
+    if(handoffConditionRef.current==='timer'&&(MAX_VENT_SECONDS-timeLeft)>=TIMER_HANDOFF_SECONDS)setShowHandoff(true)
+  },[phase,timeLeft])
 
   // Final telemetry flush when the session ends (timer out or "End Session").
   // NB: we intentionally do NOT close the unified `session` here — it stays
@@ -1078,6 +1106,28 @@ export function AngerReleaseGame(){
               🏠 Change Room
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Calm Meter + score-driven handoff (Novelty #1, user-facing) */}
+      {phase==='playing'&&(
+        <div className="rounded-xl border border-white/12 bg-black/40 p-3 backdrop-blur-sm space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wide text-white/55">Calm Meter</span>
+            <span className="text-xs font-bold" style={{color:`hsl(${Math.round(readiness*120)},80%,60%)`}}>{Math.round(readiness*100)}%</span>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+            <div className="h-full rounded-full transition-all duration-700 ease-out"
+              style={{width:`${Math.round(readiness*100)}%`,backgroundColor:`hsl(${Math.round(readiness*120)},80%,55%)`}}/>
+          </div>
+          {showHandoff&&(
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2">
+              <span className="text-xs text-emerald-200">You seem to be finding some calm — ready to reflect on it?</span>
+              <Link href={handoffSessionId?`/chat?session=${handoffSessionId}`:'/chat'}>
+                <span className="whitespace-nowrap rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-black hover:bg-emerald-400 transition-all">Talk it through 🕊️</span>
+              </Link>
+            </div>
+          )}
         </div>
       )}
 

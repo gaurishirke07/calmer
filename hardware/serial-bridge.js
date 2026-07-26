@@ -54,6 +54,7 @@ const PRESSURE_MAP = {
 let latestGripPressure = null
 let latestHeartRate = null
 let latestIbi = null
+let lastBpmTime = 0
 let sendTimer = null
 
 const port = new SerialPort({ path: PORT_PATH, baudRate: 9600 })
@@ -83,6 +84,7 @@ parser.on('data', (line) => {
     // constantly with hand movement, and this device is used *while venting*.
     if (bpm >= 30 && bpm <= 220) {
       latestHeartRate = bpm
+      lastBpmTime = Date.now()
       scheduleSend()
     } else {
       console.warn('[bridge] ignoring implausible BPM:', bpm)
@@ -111,6 +113,16 @@ function scheduleSend() {
 }
 
 async function sendReading() {
+  // Pulse sensors drop out with movement — and this one is worn WHILE venting.
+  // If no beat for >10s, mark HR/HRV unavailable instead of sending stale
+  // values; the readiness score then drops biometricTrend and renormalizes
+  // (graceful degradation exercised in the field).
+  if (latestHeartRate !== null && Date.now() - lastBpmTime > 10000) {
+    console.warn('[bridge] no pulse for >10s — marking HR/IBI unavailable')
+    latestHeartRate = null
+    latestIbi = null
+  }
+
   if (latestGripPressure === null && latestHeartRate === null) return
 
   const payload = {

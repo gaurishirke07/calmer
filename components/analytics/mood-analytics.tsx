@@ -121,7 +121,7 @@ export function MoodAnalytics() {
         <Card className="border-border/50 bg-card/50">
           <CardHeader>
             <CardTitle>Emotion Distribution</CardTitle>
-            <CardDescription>Breakdown of detected emotions during chat interactions</CardDescription>
+            <CardDescription>The text-sentiment signal across your chat messages — a noisy estimate, not ground-truth emotion</CardDescription>
           </CardHeader>
           <CardContent className="h-72">
             <ResponsiveContainer width="100%" height="100%">

@@ -1,19 +1,28 @@
-// CALMER Readiness Score — Novelty Claim #1 implementation
+// CALMER Readiness Score — a JITAI decision rule for the venting→reflection handoff.
 //
-// Fuses up to four signals into a single 0..1 "readiness" score that drives
-// the Module 1 -> Module 2 handoff (the "Find Peace" prompt). Unlike a fixed
-// timer or a message-count rule (e.g. the state-machine approach used by
-// comparable therapeutic-chatbot orchestration systems), this score updates
-// continuously and degrades gracefully when a signal is unavailable — e.g.
-// no hardware connected yet still produces a valid score from venting +
-// text alone, per the report's documented alternate flow.
+// In just-in-time adaptive intervention (JITAI) terms [Nahum-Shani et al. 2018,
+// Ann Behav Med 52(6):446-462]: the readiness score is a *tailoring variable*,
+// the venting→reflection handoff is the *decision point*, this fusion logic is
+// the *decision rule*, and "calm-enough" (readiness ≥ threshold) is a *state of
+// receptivity*. The delta vs prior work: a continuous, multi-signal score that
+// RENORMALISES over whichever signals are present — not a fixed timer, a
+// message-count rule / FSM [Elahimanesh 2026], or a single physiological
+// threshold [Neupane 2025]. It degrades gracefully: with no hardware it still
+// produces a valid score from venting + text alone (signalsUsed records which
+// signals actually contributed).
 //
-// Signals (weights are a starting point — tune once you have pilot data,
-// this is exactly the kind of parameter the RCT in Novelty Claim #2 of the
-// report should be validating):
+// This OPERATIONALISES the arousal-neutral symbolic pathway — it does NOT
+// "resolve the catharsis paradox" (settled science: arousal-increasing venting
+// fails [Bushman 2002; Kjærvik & Bushman 2024], symbolic disposal works
+// [Kanaya & Kawai 2024]). The venting time cap + fast handoff (in the game)
+// enforce it.
+//
+// Weights are a starting point — a tunable decision-rule parameter to validate
+// with a micro-randomized trial [Klasnja et al. 2015]:
 //   - ventingTrend    (0.35): is venting intensity declining over time?
 //   - biometricTrend  (0.30): is heart rate / grip pressure returning to baseline?
-//   - sentiment       (0.20): is recent text less negative?
+//   - sentiment       (0.20): is the *text-sentiment signal* less negative? (a
+//                             noisy estimate, not ground-truth emotion [Barrett 2019])
 //   - sessionContext  (0.15): has enough time/interaction passed to be meaningful?
 
 export type StressLevel = 'low' | 'moderate' | 'high'
