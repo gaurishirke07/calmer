@@ -133,6 +133,8 @@ export interface BiometricReading {
   device_id?: string | null
   heart_rate?: number | null
   grip_pressure?: number | null
+  ibi?: number | null
+  rmssd?: number | null
   stress_class?: StressLevel | null
   recorded_at: string
 }

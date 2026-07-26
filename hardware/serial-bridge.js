@@ -23,9 +23,10 @@
 // browser when a Rage Room session starts). A "pair device" QR/code flow is
 // a good next step once the ingest path itself is proven out.
 
+try { require('dotenv').config() } catch { /* dotenv optional */ }
 const { SerialPort } = require('serialport')
 const { ReadlineParser } = require('@serialport/parser-readline')
-const fetch = require('node-fetch')
+// Node 18+ ships a global fetch — no node-fetch dependency needed.
 
 const args = process.argv.slice(2)
 function getArg(flag, fallback) {
@@ -52,6 +53,7 @@ const PRESSURE_MAP = {
 
 let latestGripPressure = null
 let latestHeartRate = null
+let latestIbi = null
 let sendTimer = null
 
 const port = new SerialPort({ path: PORT_PATH, baudRate: 9600 })
@@ -66,15 +68,36 @@ parser.on('data', (line) => {
   const pressureMatch = line.match(/^Pressure:(\d+)\s+Level:(\w+)/)
   if (pressureMatch) {
     const rawValue = parseInt(pressureMatch[1], 10)
-    latestGripPressure = rawValue
-    scheduleSend()
+    // FSR is a 10-bit ADC (0-1023); ignore out-of-range noise.
+    if (rawValue >= 0 && rawValue <= 1023) {
+      latestGripPressure = rawValue
+      scheduleSend()
+    }
     return
   }
 
   const bpmMatch = line.match(/^BPM:(\d+)/)
   if (bpmMatch) {
-    latestHeartRate = parseInt(bpmMatch[1], 10)
-    scheduleSend()
+    const bpm = parseInt(bpmMatch[1], 10)
+    // Reject physiologically impossible values — the pulse sensor drops out
+    // constantly with hand movement, and this device is used *while venting*.
+    if (bpm >= 30 && bpm <= 220) {
+      latestHeartRate = bpm
+      scheduleSend()
+    } else {
+      console.warn('[bridge] ignoring implausible BPM:', bpm)
+    }
+    return
+  }
+
+  const ibiMatch = line.match(/^IBI:(\d+)/)
+  if (ibiMatch) {
+    const ibiVal = parseInt(ibiMatch[1], 10)
+    // plausible inter-beat interval ~250-2000ms (≈30-240 bpm)
+    if (ibiVal >= 250 && ibiVal <= 2000) {
+      latestIbi = ibiVal
+      scheduleSend()
+    }
   }
 })
 
@@ -94,6 +117,7 @@ async function sendReading() {
     session_id: SESSION_ID,
     heart_rate: latestHeartRate,
     grip_pressure: latestGripPressure,
+    ibi: latestIbi,
   }
 
   try {

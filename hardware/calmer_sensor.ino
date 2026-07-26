@@ -62,6 +62,8 @@ void loop() {
   if (QS == true) {
     Serial.print("BPM:");
     Serial.println(BPM);
+    Serial.print("IBI:");        // inter-beat interval (ms) -> server computes RMSSD/HRV
+    Serial.println(IBI);
     QS = false;
   }
 

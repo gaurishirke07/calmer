@@ -1,0 +1,15 @@
+{
+  "name": "calmer-hardware-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serial bridge + simulator for the CALMER biometric hardware layer (Arduino pulse + FSR -> /api/biometric).",
+  "scripts": {
+    "bridge": "node serial-bridge.js",
+    "simulate": "node simulate.js"
+  },
+  "dependencies": {
+    "@serialport/parser-readline": "^12.0.0",
+    "dotenv": "^16.4.5",
+    "serialport": "^12.0.0"
+  }
+}

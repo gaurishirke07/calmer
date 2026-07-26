@@ -141,6 +141,24 @@ export function classifyBiometrics(heartRate: number | null, gripPressure: numbe
 }
 
 /**
+ * RMSSD (root mean square of successive differences) over a series of inter-beat
+ * intervals (IBI, in ms) — the standard short-window HRV metric. Higher RMSSD =
+ * more parasympathetic ("calm") variability; lower = more arousal/stress. This
+ * is the feature SWELL-KW classifies stress from `[Koldijk et al. 2014]`, so
+ * capturing it is what makes the report's HRV grounding legitimate rather than
+ * raw-BPM only. Returns null with fewer than 2 intervals.
+ */
+export function computeRMSSD(ibis: number[]): number | null {
+  if (!ibis || ibis.length < 2) return null
+  let sumSq = 0
+  for (let i = 1; i < ibis.length; i++) {
+    const d = ibis[i] - ibis[i - 1]
+    sumSq += d * d
+  }
+  return Math.sqrt(sumSq / (ibis.length - 1))
+}
+
+/**
  * STUB — lexicon-based placeholder sentiment, NOT the final NLP layer.
  * Swap for a proper model (e.g. a small transformer or an LLM classification
  * call) before this goes anywhere near the paper's results section.

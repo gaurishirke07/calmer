@@ -15,6 +15,7 @@ const eslintConfig = [
       'next-env.d.ts',
       'components/ui/**', // shadcn-generated primitives
       '_v2-reference/**', // preserved v2 variants, not compiled
+      'hardware/**', // standalone CommonJS Node scripts (own package.json)
     ],
   },
   ...nextCoreWebVitals,

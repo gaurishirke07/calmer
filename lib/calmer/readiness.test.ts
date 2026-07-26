@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeReadinessScore, classifyBiometrics } from './readiness'
+import { computeReadinessScore, classifyBiometrics, computeRMSSD } from './readiness'
 
 describe('computeReadinessScore', () => {
   it('returns a neutral moderate score when no signals are present', () => {
@@ -81,5 +81,21 @@ describe('classifyBiometrics', () => {
     const r = classifyBiometrics(null, null)
     expect(r.stressScore).toBe(0)
     expect(r.stressClass).toBe('low')
+  })
+})
+
+describe('computeRMSSD', () => {
+  it('returns null with fewer than 2 intervals', () => {
+    expect(computeRMSSD([])).toBeNull()
+    expect(computeRMSSD([800])).toBeNull()
+  })
+
+  it('is 0 when the beat interval is perfectly steady (no variability)', () => {
+    expect(computeRMSSD([800, 800, 800, 800])).toBe(0)
+  })
+
+  it('computes the root-mean-square of successive differences', () => {
+    // diffs: +50, -50 -> squares 2500, 2500 -> mean 2500 -> sqrt = 50
+    expect(computeRMSSD([800, 850, 800])).toBeCloseTo(50, 5)
   })
 })

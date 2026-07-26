@@ -1,5 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/service'
-import { classifyBiometrics, computeReadinessScore } from '@/lib/calmer/readiness'
+import { classifyBiometrics, computeReadinessScore, computeRMSSD } from '@/lib/calmer/readiness'
 
 export const runtime = 'nodejs'
 
@@ -24,6 +24,7 @@ export async function POST(req: Request) {
 
   const heartRate: number | null = body.heart_rate ?? null
   const gripPressure: number | null = body.grip_pressure ?? null
+  const ibi: number | null = body.ibi ?? null
 
   const supabase = createServiceClient()
 
@@ -39,6 +40,21 @@ export async function POST(req: Request) {
     return new Response('Unknown session_id', { status: 404 })
   }
 
+  // Pull recent readings BEFORE inserting — reused for both the biometric trend
+  // and the rolling HRV (RMSSD over the IBI sequence including this beat).
+  const { data: prior } = await supabase
+    .from('biometric_reading')
+    .select('heart_rate, grip_pressure, ibi')
+    .eq('session_id', session.id)
+    .order('recorded_at', { ascending: true })
+    .limit(20)
+
+  const ibiSequence = (prior ?? [])
+    .map((r) => r.ibi as number | null)
+    .filter((v): v is number => typeof v === 'number')
+  if (ibi !== null) ibiSequence.push(ibi)
+  const rmssd = computeRMSSD(ibiSequence.slice(-10)) // rolling 10-beat window
+
   const { stressScore, stressClass } = classifyBiometrics(heartRate, gripPressure)
 
   const { data: reading, error: readingErr } = await supabase
@@ -48,6 +64,8 @@ export async function POST(req: Request) {
       device_id: body.device_id ?? null,
       heart_rate: heartRate,
       grip_pressure: gripPressure,
+      ibi,
+      rmssd,
       stress_class: stressClass,
     })
     .select()
@@ -58,17 +76,11 @@ export async function POST(req: Request) {
     return new Response('Failed to store reading', { status: 500 })
   }
 
-  // pull recent biometric history for the trend signal
-  const { data: recentReadings } = await supabase
-    .from('biometric_reading')
-    .select('heart_rate, grip_pressure, recorded_at')
-    .eq('session_id', session.id)
-    .order('recorded_at', { ascending: true })
-    .limit(10)
-
-  const biometricStressScores = (recentReadings ?? []).map(
-    (r) => classifyBiometrics(r.heart_rate, r.grip_pressure).stressScore,
-  )
+  // biometric trend = prior readings + the one we just stored
+  const biometricStressScores = [
+    ...(prior ?? []).map((r) => classifyBiometrics(r.heart_rate, r.grip_pressure).stressScore),
+    stressScore,
+  ]
 
   const sessionDurationSeconds = (Date.now() - new Date(session.start_time).getTime()) / 1000
 
@@ -90,5 +102,5 @@ export async function POST(req: Request) {
     console.error('[biometric] emotional_state update failed', emotionErr)
   }
 
-  return Response.json({ stressClass, stressScore, readinessScore, stressLevel })
+  return Response.json({ stressClass, stressScore, readinessScore, stressLevel, rmssd })
 }
