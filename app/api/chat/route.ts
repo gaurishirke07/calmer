@@ -94,6 +94,10 @@ export async function POST(req: Request) {
 
     // ── Unified layer: persistence + fused readiness (Novelty #1) ──────────
     let previousSummaryText = ''
+    // Carries the venting stage into Module 2's PROMPT, not just into the
+    // readiness score. Without this the agent has no idea the user just spent
+    // two minutes in the rage room, so the handoff feels like a cold restart.
+    let ventingContext = ''
     if (sessionId && userText) {
       // Pull the session + this session's venting/biometric history in one round.
       const [{ data: sessionRow }, { data: ventRows }, { data: bioRows }] = await Promise.all([
@@ -151,6 +155,17 @@ export async function POST(req: Request) {
       })
       const source = signalsUsed.length > 1 ? 'fused' : 'text'
 
+      // Only when this session actually has a venting stage behind it.
+      if (ventingIntensities.length > 0) {
+        ventingContext =
+          `Session context: this user has just come from a venting session in the rage room ` +
+          `(${ventingIntensities.length} logged actions). Their computed readiness is ` +
+          `${readinessScore.toFixed(2)} on a 0-1 scale, where 0 means still highly activated and ` +
+          `1 means calm. Open by gently acknowledging that they have just been venting and invite ` +
+          `them to reflect on what brought it on. Never mention scores, numbers or sensors to the ` +
+          `user, and do not sound clinical.\n`
+      }
+
       const [{ error: convoErr }, { error: stateErr }] = await Promise.all([
         supabase.from('therapist_convo').insert({
           session_id: sessionId,
@@ -196,6 +211,7 @@ export async function POST(req: Request) {
 ${formattedMemories}
 
 ${previousSummaryText}
+${ventingContext}
 
 Guidelines:
 1. Listen actively, validate emotions without judgment, and naturally reference the user's history and preferred calming strategies when relevant.

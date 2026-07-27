@@ -18,7 +18,18 @@
 //   CALMER_API_URL          e.g. http://localhost:3000
 //   CALMER_HARDWARE_SECRET  must equal HARDWARE_INGEST_SECRET in the app's .env.local
 
-try { require('dotenv').config() } catch { /* dotenv optional */ }
+// Fail LOUDLY if deps are missing. A silent catch here made the script
+// blame a missing .env file that actually existed, because dotenv had
+// never been installed. Run 'npm install' in hardware/ first.
+try {
+  require('dotenv').config()
+} catch {
+  console.warn(
+    '[simulate] dotenv is not installed, so hardware/.env was NOT loaded. ' +
+    'Run "npm install" inside hardware/ before using this script. ' +
+    'Falling back to whatever is already in the process environment.',
+  )
+}
 
 function getArg(flag, fallback) {
   const i = process.argv.indexOf(flag)

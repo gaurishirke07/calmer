@@ -94,16 +94,10 @@ export async function POST(req: Request) {
 
   const sessionDurationSeconds = (Date.now() - new Date(session.start_time).getTime()) / 1000
 
-  const { readinessScore, stressLevel, signalsUsed } = computeReadinessScore({
-    biometricStressScores,
-    sessionDurationSeconds,
-  })
-
-  // ── False-positive guard [Neupane et al. 2025] ─────────────────────────────
-  // A single threshold crossing must not drive a transition. Pull this
-  // session's non-biometric history and require a sustained biometric trend
-  // PLUS agreement from venting intensity or text sentiment. Rejections are
-  // stored (corroborated = false) so the rejection rate is recoverable.
+  // Pull this session's NON-biometric history before scoring. It is needed
+  // twice: once so the readiness score genuinely fuses across the whole
+  // session rather than seeing biometrics alone, and again for the
+  // false-positive guard below [Neupane et al. 2025].
   const [{ data: ventRows }, { data: sentimentRows }] = await Promise.all([
     supabase
       .from('venting_interaction')
@@ -120,10 +114,25 @@ export async function POST(req: Request) {
       .limit(10),
   ])
 
+  const ventingIntensities = (ventRows ?? []).map(
+    (r: { intensity_score: number }) => Number(r.intensity_score),
+  )
+  const sentimentScores = (sentimentRows ?? []).map(
+    (r: { sentiment_score: number }) => Number(r.sentiment_score),
+  )
+
+  // Fuse everything this session has, not just the sensor that triggered us.
+  const { readinessScore, stressLevel, signalsUsed } = computeReadinessScore({
+    biometricStressScores,
+    ventingIntensities,
+    sentimentScores,
+    sessionDurationSeconds,
+  })
+
   const { corroborated, reason } = corroborateBiometricTransition({
     biometricStressScores,
-    ventingIntensities: (ventRows ?? []).map((r: { intensity_score: number }) => Number(r.intensity_score)),
-    sentimentScores: (sentimentRows ?? []).map((r: { sentiment_score: number }) => Number(r.sentiment_score)),
+    ventingIntensities,
+    sentimentScores,
   })
 
   if (!corroborated) {

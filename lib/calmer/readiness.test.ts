@@ -52,6 +52,21 @@ describe('computeReadinessScore', () => {
     expect(fused.readinessScore).toBeLessThanOrEqual(1)
   })
 
+  it('refuses to infer calm from elapsed time alone', () => {
+    // A lone sessionContext term used to renormalize to full weight and report
+    // readiness 1.0 on a long-running session with no substantive signal.
+    const r = computeReadinessScore({ sessionDurationSeconds: 600 })
+    expect(r.readinessScore).toBe(0.5)
+    expect(r.stressLevel).toBe('moderate')
+    expect(r.signalsUsed).toEqual(['sessionContext'])
+  })
+
+  it('uses sessionContext once a substantive signal exists', () => {
+    const r = computeReadinessScore({ ventingIntensities: [80, 20], sessionDurationSeconds: 600 })
+    expect(r.readinessScore).toBeGreaterThan(0.5)
+    expect(r.signalsUsed).toEqual(expect.arrayContaining(['ventingTrend', 'sessionContext']))
+  })
+
   it('propagates the stub-sentiment flag onto the result', () => {
     const r = computeReadinessScore({ sentimentScores: [-0.5], usingStubSentiment: true })
     expect(r.usingStubSignals).toBe(true)

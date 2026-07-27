@@ -50,3 +50,8 @@ next-env.d.ts
 # are publicly available, so they must stay in the repo.
 paper/
 docs/lit-review-final.md
+
+# Regenerable figure data — produced by scripts/generate-fig3.js, which IS
+# tracked. Committing the output invites a stale copy diverging from whatever
+# interval the figure was actually plotted at.
+fig3-data.json

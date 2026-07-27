@@ -54,14 +54,31 @@ const WEIGHTS = {
   sessionContext: 0.15,
 }
 
-/** Simple linear trend: positive = declining (calming), 0..1 normalized. */
+/**
+ * Decline signal: how far has intensity fallen from this session's peak?
+ * 0.5 = no decline, 1 = fully settled, 0 = escalating past the previous peak.
+ *
+ * This compares a RECENT WINDOW against the SESSION PEAK, deliberately not
+ * first-vs-last of a sliding window. The sliding-window version had two fatal
+ * behaviours: once the user stopped, the window filled with zeros and read
+ * `0 -> 0` as "flat", so the score climbed for about thirty seconds and then
+ * collapsed back exactly when the user was calmest; and a steadily venting user
+ * sat permanently at "flat", which capped readiness below the handoff
+ * threshold and made the decision point unreachable. Measuring against the peak
+ * keeps a settled user settled.
+ */
 function trendSignal(values: number[]): number | null {
   if (!values || values.length < 2) return null
-  const first = values[0]
-  const last = values[values.length - 1]
-  const maxPossibleDrop = Math.max(first, 1)
-  const drop = (first - last) / maxPossibleDrop
-  return clamp01(0.5 + drop / 2) // 0.5 = flat, 1 = fully calmed, 0 = escalating
+  const peak = Math.max(...values)
+  // Smoothing window: wide enough to ride out noise in a long session, but not
+  // so wide that it swallows the decline in a short one.
+  const w = Math.max(1, Math.min(5, Math.floor(values.length / 4)))
+  const recent = values.slice(-w).reduce((a, b) => a + b, 0) / w
+  // Distance below the session peak, over the full 0..1 range: sitting AT the
+  // peak (venting hard, or escalating toward a new peak) reads 0, and having
+  // settled to nothing reads 1. This matches the score's stated semantics,
+  // where 0 is still highly activated and 1 is calm.
+  return clamp01((peak - recent) / Math.max(peak, 1))
 }
 
 function averageSignal(values: number[], normalize: (v: number) => number): number | null {
@@ -94,6 +111,22 @@ export function computeReadinessScore(inputs: ReadinessInputs): ReadinessResult 
 
   if (available.length === 0) {
     return { readinessScore: 0.5, stressLevel: 'moderate', signalsUsed: [], usingStubSignals }
+  }
+
+  // sessionContext is a CONTEXTUAL MODIFIER, not evidence of calm. On its own it
+  // says only "time has passed", and because renormalisation would hand it the
+  // full weight, a lone sessionContext term reported readiness 1.0 — i.e. "fully
+  // calm" — on the very first biometric reading of an older session, even while
+  // that reading measured high stress. Refuse to infer calm from elapsed time
+  // alone; report neutral, but still record honestly which signals were present.
+  const SUBSTANTIVE: (keyof typeof WEIGHTS)[] = ['ventingTrend', 'biometricTrend', 'sentiment']
+  if (!available.some((c) => SUBSTANTIVE.includes(c.key))) {
+    return {
+      readinessScore: 0.5,
+      stressLevel: 'moderate',
+      signalsUsed: available.map((c) => c.key),
+      usingStubSignals,
+    }
   }
 
   // renormalize weights across only the signals we actually have

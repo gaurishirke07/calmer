@@ -921,21 +921,36 @@ export function AngerReleaseGame(){
   },[])
 
   const flushVentingInteractions=useCallback(async()=>{
+    if(!sessionIdRef.current)return
     const batch=pendingInteractionsRef.current
-    if(batch.length===0||!sessionIdRef.current)return
     pendingInteractionsRef.current=[]
 
     const supabase=createClient()
     const sid=sessionIdRef.current
-    const rows=batch.map(b=>({session_id:sid,input_type:b.input_type,intensity_score:b.intensity_score,target_label:b.target_label}))
-    const{error}=await supabase.from('venting_interaction').insert(rows)
-    if(error)console.error('[game] failed to save venting_interaction:',error.message)
+
+    if(batch.length>0){
+      const rows=batch.map(b=>({session_id:sid,input_type:b.input_type,intensity_score:b.intensity_score,target_label:b.target_label}))
+      const{error}=await supabase.from('venting_interaction').insert(rows)
+      if(error)console.error('[game] failed to save venting_interaction:',error.message)
+    }else{
+      // IDLE TICK. Going quiet IS a decline in venting intensity, and it is the
+      // *largest* decline available. Before this, an empty batch returned early,
+      // so the trend froze the moment the user stopped — meaning the readiness
+      // arm could never fire for the user who calmed down most completely, and
+      // the trajectory plateaued exactly where it should climb fastest.
+      // Push a zero sample so quiet time moves the trend instead of pausing it.
+      intensityHistoryRef.current.push(0)
+      if(intensityHistoryRef.current.length>40)intensityHistoryRef.current.shift()
+    }
 
     // Recompute readiness from the rolling intensity trend after each flush.
     // Venting-only for now; it fuses with biometric/text automatically once
     // those modules write emotional_state against the same session_id.
     const{readinessScore,stressLevel,signalsUsed}=computeReadinessScore({
-      ventingIntensities:intensityHistoryRef.current.slice(-10),
+      // Pass the WHOLE history, not a slice — trendSignal measures decline from
+      // the session peak and does its own windowing. Slicing here hid the peak
+      // and made a settled user look "flat" again.
+      ventingIntensities:intensityHistoryRef.current,
       sessionDurationSeconds:(Date.now()-gameStartTimeRef.current)/1000,
     })
     setReadiness(readinessScore)

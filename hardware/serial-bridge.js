@@ -23,7 +23,18 @@
 // browser when a Rage Room session starts). A "pair device" QR/code flow is
 // a good next step once the ingest path itself is proven out.
 
-try { require('dotenv').config() } catch { /* dotenv optional */ }
+// Fail LOUDLY if deps are missing. A silent catch here made the script
+// blame a missing .env file that actually existed, because dotenv had
+// never been installed. Run 'npm install' in hardware/ first.
+try {
+  require('dotenv').config()
+} catch {
+  console.warn(
+    '[bridge] dotenv is not installed, so hardware/.env was NOT loaded. ' +
+    'Run "npm install" inside hardware/ before using this script. ' +
+    'Falling back to whatever is already in the process environment.',
+  )
+}
 const { SerialPort } = require('serialport')
 const { ReadlineParser } = require('@serialport/parser-readline')
 // Node 18+ ships a global fetch — no node-fetch dependency needed.
