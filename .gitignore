@@ -26,3 +26,27 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ── Paper and research working files (excluded regardless of repo visibility) ─
+# These stay out of git whether the repo is public or private. This is a
+# separation-of-concerns decision, not only an exposure one.
+#
+# paper/  — the manuscript lives in Overleaf, which is its own source of truth
+#   and its own version history. Mirroring it here creates two divergent copies
+#   and no way to tell which is current. (Exposure matters too: this repo is
+#   named in the paper, so a public copy carrying author names would break
+#   double-blind review, and some venues treat it as a prior preprint.)
+#
+# docs/lit-review-final.md — internal audit. It records that the earlier
+#   report's bibliography was fabricated, names a previously cited source as a
+#   predatory-publisher proceeding, and logs the citation errors found. That is
+#   the right thing to keep for ourselves and the wrong thing to ship in a
+#   deliverable, private repo or not.
+#
+# Back these up outside git — Overleaf history for the paper, shared drive for
+# the audit. Neither has a safety net here.
+#
+# NOTE: scripts/ migrations are NOT ignored — the paper states that migrations
+# are publicly available, so they must stay in the repo.
+paper/
+docs/lit-review-final.md

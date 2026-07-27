@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { computeReadinessScore, classifyBiometrics, computeRMSSD } from './readiness'
+import {
+  computeReadinessScore,
+  classifyBiometrics,
+  computeRMSSD,
+  corroborateBiometricTransition,
+} from './readiness'
 import { combineRisk } from './safety'
 
 describe('computeReadinessScore', () => {
@@ -119,5 +124,56 @@ describe('combineRisk (layered safety)', () => {
   it('is none for ordinary messages', () => {
     expect(combineRisk(false, 'NONE')).toBe('none')
     expect(combineRisk(false, null)).toBe('none')
+  })
+})
+
+// The false-positive guard [Neupane et al. 2025]: one threshold crossing must
+// never drive a transition on its own.
+describe('corroborateBiometricTransition', () => {
+  const calming = [0.9, 0.7, 0.5]
+  const decliningVenting = [80, 40, 10]
+
+  it('rejects when there is not enough biometric history', () => {
+    const r = corroborateBiometricTransition({ biometricStressScores: [0.9, 0.5], ventingIntensities: decliningVenting })
+    expect(r.corroborated).toBe(false)
+    expect(r.reason).toContain('insufficient')
+  })
+
+  it('rejects a sustained decline that no other signal agrees with', () => {
+    const r = corroborateBiometricTransition({ biometricStressScores: calming })
+    expect(r.corroborated).toBe(false)
+    expect(r.reason).toContain('no non-biometric signal')
+  })
+
+  it('rejects a single dip that is not sustained', () => {
+    const r = corroborateBiometricTransition({
+      biometricStressScores: [0.3, 0.9, 0.2],
+      ventingIntensities: decliningVenting,
+    })
+    expect(r.corroborated).toBe(false)
+    expect(r.reason).toContain('not sustained')
+  })
+
+  it('corroborates a sustained decline that venting trend agrees with', () => {
+    const r = corroborateBiometricTransition({
+      biometricStressScores: calming,
+      ventingIntensities: decliningVenting,
+    })
+    expect(r.corroborated).toBe(true)
+    expect(r.reason).toContain('ventingTrend')
+  })
+
+  it('corroborates via sentiment when venting data is absent', () => {
+    const r = corroborateBiometricTransition({ biometricStressScores: calming, sentimentScores: [0.4] })
+    expect(r.corroborated).toBe(true)
+    expect(r.reason).toContain('sentiment')
+  })
+
+  it('tolerates a small blip without breaking the run', () => {
+    const r = corroborateBiometricTransition({
+      biometricStressScores: [0.9, 0.92, 0.6],
+      ventingIntensities: decliningVenting,
+    })
+    expect(r.corroborated).toBe(true)
   })
 })

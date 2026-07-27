@@ -200,12 +200,14 @@ function mkRagdoll():RagdollBone{
 export function AngerReleaseGame(){
   const canvasRef=useRef<HTMLCanvasElement>(null)
   const[phase,setPhase]=useState<Phase>('start')
-  const[score,setScore]=useState(0)
+  // NOTE: there is deliberately NO score here. Rewarding volume of destruction
+  // would reinforce the arousal-increasing behaviour that the anger literature
+  // says does not reduce anger [Kjærvik & Bushman 2024; Bushman 2002]. Feedback
+  // is keyed to the readiness score and the handoff instead.
   const[weapon,setWeapon]=useState<WeaponType>('bat')
   const[ammo,setAmmo]=useState({gun:30,shotgun:12,grenade:6,molotov:4,chainsaw:100})
   const[buddyHp,setBuddyHp]=useState(100)
   const[timeLeft,setTimeLeft]=useState(120)
-  const[destroyed,setDestroyed]=useState(0)
   // live readiness (Novelty #1) — recomputed on every telemetry flush
   const[readiness,setReadiness]=useState(0.5)
   // reactive copy of sessionIdRef for the handoff <Link> (refs aren't safe to
@@ -223,8 +225,6 @@ export function AngerReleaseGame(){
   const phaseRef   =useRef<Phase>('start')
   const weaponRef  =useRef<WeaponType>('bat')
   const ammoRef    =useRef({gun:30,shotgun:12,grenade:6,molotov:4,chainsaw:100})
-  const scoreRef   =useRef(0)
-  const destroyRef =useRef(0)
   const themeRef   =useRef<RoomTheme>('classroom')
   const mousePos   =useRef({x:-500,y:-500})
   const mouseDown  =useRef(false)
@@ -319,7 +319,6 @@ export function AngerReleaseGame(){
         emit(rd.x,rd.y-50,'blood',15+damage*5,['#cc0000','#990000','#ff0000','#800000'],8,6,65)
         emit(rd.x,rd.y-50,'spark',6,['#ffcc00','#ff9900'],5,3,20)
         setBuddyHp(rd.health)
-        setScore(s=>{scoreRef.current=s+damage*8;return scoreRef.current})
         if(rd.health<=0 && !rd.exploding)explodeRagdoll()
         hitAny=true
       }
@@ -346,8 +345,6 @@ export function AngerReleaseGame(){
           emitShard(obj.x+obj.w/2,obj.y+obj.h/2,obj.color,16)
           emit(obj.x+obj.w/2,obj.y+obj.h/2,'spark',24,['#ffcc00','#ff6600','#fff'],9,4,38)
           if(w==='molotov')fires.current.push({x:obj.x+obj.w/2,y:FLOOR_Y,r:50+Math.random()*25,life:230,maxLife:230})
-          setScore(s=>{scoreRef.current=s+obj.points;return scoreRef.current})
-          setDestroyed(d=>{destroyRef.current=d+1;return destroyRef.current})
           if(objsRef.current.filter(o=>!o.broken).length===0)setPhase('allClear')
         }
         hitAny=true
@@ -956,8 +953,6 @@ export function AngerReleaseGame(){
 
   // ── Game control ────────────────────────────────────────────────────────────
   const startGame=useCallback(async(th:RoomTheme=theme)=>{
-    setScore(0);scoreRef.current=0
-    setDestroyed(0);destroyRef.current=0
     setTimeLeft(MAX_VENT_SECONDS)
     setAmmo({gun:30,shotgun:12,grenade:6,molotov:4,chainsaw:100})
     ammoRef.current={gun:30,shotgun:12,grenade:6,molotov:4,chainsaw:100}
@@ -1046,10 +1041,10 @@ export function AngerReleaseGame(){
     <div className="space-y-3" style={{fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
 
       {/* Stats */}
-      <div className="grid grid-cols-5 gap-2">
+      {/* No score / destruction-volume counters here — see the note at the top
+          of this component. Feedback is readiness-keyed (the Calm Meter). */}
+      <div className="grid grid-cols-3 gap-2">
         {([
-          {label:'Score',    value:score,         color:'#fbbf24'},
-          {label:'Smashed',  value:destroyed,      color:'#f87171'},
           {label:'Time',     value:`${timeLeft}s`, color:'#60a5fa'},
           {label:'Buddy HP', value:`${buddyHp}%`,  color:buddyHp>60?'#4ade80':buddyHp>30?'#fb923c':'#f87171'},
           {label:'Room',     value:THEMES[theme].emoji+' '+THEMES[theme].label,color:'#c084fc'},
@@ -1203,9 +1198,17 @@ export function AngerReleaseGame(){
             <div className="text-5xl mb-3">🧹</div>
             <h2 className="text-3xl font-black text-white mb-1">SESSION DONE</h2>
             <p className="text-white/45 mb-7 text-sm">Feel that weight lift?</p>
+            {/* Closing feedback is about the regulation outcome and the
+                handoff — NOT about how much was destroyed. */}
             <div className="grid grid-cols-2 gap-10 mb-8 text-center">
-              <div><p className="text-5xl font-black text-yellow-400">{score}</p><p className="text-xs text-white/45 mt-1">SCORE</p></div>
-              <div><p className="text-5xl font-black text-red-400">{destroyed}</p><p className="text-xs text-white/45 mt-1">OBJECTS SMASHED</p></div>
+              <div>
+                <p className="text-5xl font-black" style={{color:`hsl(${Math.round(readiness*120)},80%,60%)`}}>{Math.round(readiness*100)}%</p>
+                <p className="text-xs text-white/45 mt-1">CALM REACHED</p>
+              </div>
+              <div>
+                <p className="text-5xl font-black text-sky-400">{MAX_VENT_SECONDS-timeLeft}s</p>
+                <p className="text-xs text-white/45 mt-1">TIME SPENT</p>
+              </div>
             </div>
             {/* Transition system (Novelty #1), user-facing half: the message is
                 keyed to the final readiness score rather than static copy, and

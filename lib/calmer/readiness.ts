@@ -108,6 +108,73 @@ export function computeReadinessScore(inputs: ReadinessInputs): ReadinessResult 
 }
 
 /**
+ * FALSE-POSITIVE GUARD for biometric-driven state changes.
+ *
+ * In the closest wearable+LLM study only about ONE IN FIVE detected
+ * physiological events actually warranted an intervention [Neupane et al. 2025,
+ * CHI EA], and the nearest agent system likewise flags recognition accuracy as
+ * unresolved [Saffaryazdi et al. 2025]. A single threshold crossing must
+ * therefore not be allowed to drive a transition on its own.
+ *
+ * We require BOTH of:
+ *   1. a SUSTAINED calming trend across `minConsecutive` biometric readings
+ *      (noise-tolerant: a blip up to EPS does not break the run), and
+ *   2. at least one NON-BIOMETRIC signal agreeing that the user is calming
+ *      (venting intensity declining, or text sentiment non-negative).
+ *
+ * Rejections are returned with a reason so the caller can log them — the
+ * rejection rate is itself a reportable result.
+ */
+export interface CorroborationInputs {
+  biometricStressScores?: number[] // 0..1, chronological, most recent last
+  ventingIntensities?: number[]    // chronological
+  sentimentScores?: number[]       // -1..1, chronological
+  minConsecutive?: number          // default 3
+}
+
+export interface CorroborationResult {
+  corroborated: boolean
+  reason: string
+}
+
+/** A blip of this size does not break an otherwise sustained downward run. */
+const CORROBORATION_EPS = 0.05
+
+export function corroborateBiometricTransition(inputs: CorroborationInputs): CorroborationResult {
+  const minConsecutive = inputs.minConsecutive ?? 3
+  const bio = inputs.biometricStressScores ?? []
+
+  if (bio.length < minConsecutive) {
+    return { corroborated: false, reason: `insufficient biometric history (${bio.length}/${minConsecutive})` }
+  }
+
+  const window = bio.slice(-minConsecutive)
+  let sustained = window[window.length - 1] < window[0]
+  for (let i = 1; i < window.length && sustained; i++) {
+    if (window[i] > window[i - 1] + CORROBORATION_EPS) sustained = false
+  }
+  if (!sustained) {
+    return { corroborated: false, reason: 'biometric trend not sustained across consecutive readings' }
+  }
+
+  const ventingTrend = trendSignal(inputs.ventingIntensities ?? [])
+  const ventingAgrees = ventingTrend !== null && ventingTrend > 0.5
+
+  const sentiments = inputs.sentimentScores ?? []
+  const sentimentAgrees =
+    sentiments.length > 0 && sentiments.reduce((a, b) => a + b, 0) / sentiments.length >= 0
+
+  if (!ventingAgrees && !sentimentAgrees) {
+    return { corroborated: false, reason: 'no non-biometric signal agrees' }
+  }
+
+  return {
+    corroborated: true,
+    reason: `sustained biometric decline corroborated by ${ventingAgrees ? 'ventingTrend' : 'sentiment'}`,
+  }
+}
+
+/**
  * Maps a raw FSR pressure reading + BPM into a single 0..1 "biometric stress
  * score" for fusion above.
  *

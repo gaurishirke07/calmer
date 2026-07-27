@@ -14,20 +14,22 @@ The research contribution is a continuous, multi-signal **readiness score** that
 | Layer | What it does |
 |---|---|
 | **Unified schema** (`scripts/003`) | `session` is the hub; `emotional_state` is the pivot (readiness snapshots); `venting_interaction` (Module 1), `therapist_convo` (Module 2), `biometric_reading` + `hardware_device` (hardware), `safety_flag` (crisis). |
-| **Readiness fusion** (`lib/calmer/readiness.ts`) | `computeReadinessScore` weight-fuses available signals and renormalizes; `classifyBiometrics` maps HR/pressure to a stress score. |
-| **Sentiment** (`lib/calmer/emotion-classifier.ts`) | j-hartmann emotion classifier via the HF Inference router; loud lexicon-stub fallback. |
+| **Readiness fusion** (`lib/calmer/readiness.ts`) | `computeReadinessScore` weight-fuses available signals and renormalizes; `classifyBiometrics` maps HR/pressure to a stress score; `corroborateBiometricTransition` blocks single-threshold transitions. |
+| **Sentiment** (`lib/calmer/emotion-classifier.ts`) | j-hartmann emotion classifier via the HF Inference router; loud lexicon-stub fallback (never silent). |
+| **Safety** (`lib/calmer/safety.ts`) | Layered crisis detection: lexical pre-filter + LLM risk check, combined conservatively; safety-mode reply and a persisted `safety_flag`. |
 | **Cross-module fusion** | One `session` spans venting **and** chat: the rage room's `session_id` is carried into `/chat?session=...`, so chat readiness fuses venting history with text sentiment. |
-| **Hardware** (`hardware/`) | Arduino (pulse + FSR) → `serial-bridge.js` → `/api/biometric`. |
+| **Hardware** (`hardware/`) | Arduino (pulse + FSR) → `serial-bridge.js` → `/api/biometric`. Inter-beat intervals become a rolling RMSSD. |
 
 ## Tech stack
 
-Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/ui · Supabase (Postgres + Auth + RLS) · Vercel AI SDK v6 · Llama-3.3-70B via Hugging Face router · Vitest · ESLint (eslint-config-next).
+Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/ui · Supabase (Postgres + Auth + RLS) · Vercel AI SDK v6 · Llama-3.3-70B via **Groq** (OpenAI-compatible API) · j-hartmann classifier via the Hugging Face Inference router · Vitest · ESLint (eslint-config-next).
 
 ## Prerequisites
 
 - Node.js 20+ (developed on 24)
 - A Supabase project
-- A Hugging Face account + token (for chat **and** the classifier)
+- A **Groq** API key (the chat model)
+- A **Hugging Face** token (the sentiment classifier only)
 
 ## Setup
 
@@ -42,16 +44,30 @@ Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/
    ```
    `.env.local` is gitignored — never commit real keys, especially `SUPABASE_SERVICE_ROLE_KEY`. Do **not** leave placeholder duplicates in the file; dotenv keeps the last value.
 
-3. **Database** — run the migrations in order in the Supabase SQL editor:
+3. **Database** — run all ten migrations **in numeric order** in the Supabase SQL editor:
    ```
-   scripts/001_create_calmer_tables.sql      # legacy tables
-   scripts/002_upgrade_calmer_schema.sql     # memory + mood logs
-   scripts/003_calmer_unified_schema.sql     # unified entity model (the paper's schema)
-   scripts/004_add_signals_used.sql          # signals_used / using_stub_signals on emotional_state
+   001_create_calmer_tables.sql          # original tables
+   002_upgrade_calmer_schema.sql         # user_memories + mood logs
+   003_calmer_unified_schema.sql         # unified entity model (the paper's schema)
+   004_add_signals_used.sql              # signals_used / using_stub_signals
+   005_drop_game_sessions.sql            # retire legacy game table
+   006_session_chat_metadata.sql         # title / summary / mood on session
+   007_drop_legacy_chat_tables.sql       # retire legacy chat + mood tables
+   008_biometric_hrv.sql                 # ibi + rolling rmssd
+   009_session_mrt_condition.sql         # micro-randomised trial assignment
+   010_emotional_state_corroborated.sql  # biometric corroboration outcome
    ```
    Then confirm RLS: as user A you must not be able to read user B's `session` rows.
 
-4. **Hugging Face** — `Llama-3.3-70B-Instruct` is **gated**: accept its license on the model's HF page under the same account as `HF_TOKEN`, or chat calls 403 silently.
+4. **Hardware (optional)** — `hardware/` needs its own env file:
+   ```bash
+   cp hardware/.env.example hardware/.env
+   ```
+   `CALMER_HARDWARE_SECRET` there **must match** `HARDWARE_INGEST_SECRET` in `.env.local`, or the bridge and simulator get a 401. You can exercise the whole sensing path with no board attached:
+   ```bash
+   node hardware/simulate.js --session <SESSION_UUID>
+   ```
+   See `hardware/TESTING.md` for the real-board procedure.
 
 ## Running
 
@@ -74,7 +90,7 @@ Walk the flow: sign up → rage room → **Find Peace** → chat → dashboard. 
 
 ## Testing
 
-Unit tests cover the pure novelty logic in `lib/calmer/readiness.ts` (fusion, renormalization, graceful degradation, biometric classification) — no DB or network required. Add tests alongside the code as `*.test.ts`.
+24 unit tests cover the pure logic the research claim rests on — score bounds, weight renormalization over any subset of signals, honest reporting of which signals contributed, biometric classification bands, RMSSD, the layered safety combination, and the biometric corroboration rule. No DB or network required. Add tests alongside the code as `*.test.ts`.
 
 ## CI
 
@@ -92,6 +108,6 @@ components/     game/ (rage room), chat/, dashboard/, analytics/, ui/ (shadcn)
 lib/calmer/     readiness fusion + emotion classifier (the research core)
 lib/supabase/   client / server / service-role clients
 lib/services/   memory, analytics, emotion, session helpers
-scripts/        SQL migrations (run 001 → 004 in order)
+scripts/        SQL migrations (run 001 → 010 in order)
 hardware/       Arduino sketch + serial bridge
 ```

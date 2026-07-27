@@ -1,5 +1,10 @@
 import { createServiceClient } from '@/lib/supabase/service'
-import { classifyBiometrics, computeReadinessScore, computeRMSSD } from '@/lib/calmer/readiness'
+import {
+  classifyBiometrics,
+  computeReadinessScore,
+  computeRMSSD,
+  corroborateBiometricTransition,
+} from '@/lib/calmer/readiness'
 
 export const runtime = 'nodejs'
 
@@ -15,6 +20,11 @@ function isAuthorized(req: Request) {
 export async function POST(req: Request) {
   if (!isAuthorized(req)) {
     return new Response('Unauthorized', { status: 401 })
+  }
+
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.error('[biometric] SUPABASE_SERVICE_ROLE_KEY is not set — add it to .env.local and restart the dev server.')
+    return new Response('Server misconfigured: SUPABASE_SERVICE_ROLE_KEY is missing from .env.local.', { status: 500 })
   }
 
   const body = await req.json().catch(() => null)
@@ -89,12 +99,44 @@ export async function POST(req: Request) {
     sessionDurationSeconds,
   })
 
+  // ── False-positive guard [Neupane et al. 2025] ─────────────────────────────
+  // A single threshold crossing must not drive a transition. Pull this
+  // session's non-biometric history and require a sustained biometric trend
+  // PLUS agreement from venting intensity or text sentiment. Rejections are
+  // stored (corroborated = false) so the rejection rate is recoverable.
+  const [{ data: ventRows }, { data: sentimentRows }] = await Promise.all([
+    supabase
+      .from('venting_interaction')
+      .select('intensity_score')
+      .eq('session_id', session.id)
+      .order('recorded_at', { ascending: true })
+      .limit(20),
+    supabase
+      .from('emotional_state')
+      .select('sentiment_score')
+      .eq('session_id', session.id)
+      .not('sentiment_score', 'is', null)
+      .order('recorded_at', { ascending: true })
+      .limit(10),
+  ])
+
+  const { corroborated, reason } = corroborateBiometricTransition({
+    biometricStressScores,
+    ventingIntensities: (ventRows ?? []).map((r: { intensity_score: number }) => Number(r.intensity_score)),
+    sentimentScores: (sentimentRows ?? []).map((r: { sentiment_score: number }) => Number(r.sentiment_score)),
+  })
+
+  if (!corroborated) {
+    console.warn(`[biometric] transition NOT corroborated for session ${session.id}: ${reason}`)
+  }
+
   const { error: emotionErr } = await supabase.from('emotional_state').insert({
     session_id: session.id,
     biometric_reading_id: reading.id,
     stress_level: stressLevel,
     readiness_score: readinessScore,
     signals_used: signalsUsed,
+    corroborated,
     source: 'biometric',
   })
 
@@ -102,5 +144,5 @@ export async function POST(req: Request) {
     console.error('[biometric] emotional_state update failed', emotionErr)
   }
 
-  return Response.json({ stressClass, stressScore, readinessScore, stressLevel, rmssd })
+  return Response.json({ stressClass, stressScore, readinessScore, stressLevel, rmssd, corroborated })
 }
