@@ -47,6 +47,10 @@ function getArg(flag, fallback) {
 
 const PORT_PATH = getArg('--port', process.env.CALMER_SERIAL_PORT)
 const SESSION_ID = getArg('--session', process.env.CALMER_SESSION_ID)
+// Identifies THIS BOARD so its rows are distinguishable from simulated ones.
+// simulate.js deliberately never sends a label, so simulated rows keep
+// device_id = null while real hardware rows get a hardware_device id.
+const DEVICE_LABEL = getArg('--device-label', process.env.CALMER_DEVICE_LABEL || 'arduino-uno-01')
 const API_URL = process.env.CALMER_API_URL || 'http://localhost:3000'
 const SECRET = process.env.CALMER_HARDWARE_SECRET
 
@@ -141,6 +145,7 @@ async function sendReading() {
     heart_rate: latestHeartRate,
     grip_pressure: latestGripPressure,
     ibi: latestIbi,
+    device_label: DEVICE_LABEL,
   }
 
   try {

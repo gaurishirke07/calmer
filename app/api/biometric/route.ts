@@ -56,10 +56,15 @@ export async function POST(req: Request) {
     .from('biometric_reading')
     .select('heart_rate, grip_pressure, ibi')
     .eq('session_id', session.id)
-    .order('recorded_at', { ascending: true })
+    // Newest-first, reversed below. Ascending + limit returned the OLDEST 20,
+    // so the "rolling" RMSSD window was really the first ten beats of the
+    // session and the biometric trend never moved once 20 rows existed.
+    .order('recorded_at', { ascending: false })
     .limit(20)
 
-  const ibiSequence = (prior ?? [])
+  const priorChrono = (prior ?? []).slice().reverse()
+
+  const ibiSequence = priorChrono
     .map((r) => r.ibi as number | null)
     .filter((v): v is number => typeof v === 'number')
   if (ibi !== null) ibiSequence.push(ibi)
@@ -67,11 +72,41 @@ export async function POST(req: Request) {
 
   const { stressScore, stressClass } = classifyBiometrics(heartRate, gripPressure)
 
+  // ── Provenance ────────────────────────────────────────────────────────────
+  // Identify the sender so hardware rows are distinguishable from simulated
+  // ones. A real board runs serial-bridge.js with --device-label; simulate.js
+  // never sets one, so its rows keep device_id = null. Without this the two are
+  // indistinguishable after the fact, and we make a claim in print about which
+  // parts of the sensing layer have actually been exercised on hardware.
+  let deviceId: string | null = body.device_id ?? null
+  if (!deviceId && body.device_label) {
+    const { data: existing } = await supabase
+      .from('hardware_device')
+      .select('id')
+      .eq('device_label', body.device_label)
+      .maybeSingle()
+    if (existing) {
+      deviceId = existing.id
+    } else {
+      const { data: created, error: devErr } = await supabase
+        .from('hardware_device')
+        .insert({
+          device_label: body.device_label,
+          sensor_type: 'combined',
+          firmware_version: body.firmware_version ?? null,
+        })
+        .select('id')
+        .single()
+      if (devErr) console.error('[biometric] device registration failed:', devErr.message)
+      else deviceId = created.id
+    }
+  }
+
   const { data: reading, error: readingErr } = await supabase
     .from('biometric_reading')
     .insert({
       session_id: session.id,
-      device_id: body.device_id ?? null,
+      device_id: deviceId,
       heart_rate: heartRate,
       grip_pressure: gripPressure,
       ibi,
@@ -86,9 +121,11 @@ export async function POST(req: Request) {
     return new Response('Failed to store reading', { status: 500 })
   }
 
-  // biometric trend = prior readings + the one we just stored
+  // biometric trend = recent prior readings (chronological) + the one just
+  // stored. Must use priorChrono, not `prior` — the query returns newest-first
+  // and trendSignal reads the tail of the array as "most recent".
   const biometricStressScores = [
-    ...(prior ?? []).map((r) => classifyBiometrics(r.heart_rate, r.grip_pressure).stressScore),
+    ...priorChrono.map((r) => classifyBiometrics(r.heart_rate, r.grip_pressure).stressScore),
     stressScore,
   ]
 
@@ -103,18 +140,19 @@ export async function POST(req: Request) {
       .from('venting_interaction')
       .select('intensity_score')
       .eq('session_id', session.id)
-      .order('recorded_at', { ascending: true })
+      .order('recorded_at', { ascending: false })
       .limit(20),
     supabase
       .from('emotional_state')
       .select('sentiment_score')
       .eq('session_id', session.id)
       .not('sentiment_score', 'is', null)
-      .order('recorded_at', { ascending: true })
+      .order('recorded_at', { ascending: false })
       .limit(10),
   ])
 
-  const ventingIntensities = (ventRows ?? []).map(
+  // .reverse() restores chronological order for the trend calculations.
+  const ventingIntensities = (ventRows ?? []).slice().reverse().map(
     (r: { intensity_score: number }) => Number(r.intensity_score),
   )
   const sentimentScores = (sentimentRows ?? []).map(

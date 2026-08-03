@@ -102,17 +102,22 @@ export async function POST(req: Request) {
       // Pull the session + this session's venting/biometric history in one round.
       const [{ data: sessionRow }, { data: ventRows }, { data: bioRows }] = await Promise.all([
         supabase.from('session').select('start_time, title, summary').eq('id', sessionId).maybeSingle(),
+        // DESCENDING + limit, then reversed below. Ascending + limit returns the
+        // OLDEST N, which froze the trend at the start of the session — the
+        // moment the user was most activated. Invisible while sessions had
+        // fewer rows than the limit; real hardware at 2s intervals produces
+        // hundreds, so chat was scoring the user as they were on arrival.
         supabase
           .from('venting_interaction')
           .select('intensity_score, recorded_at')
           .eq('session_id', sessionId)
-          .order('recorded_at', { ascending: true })
+          .order('recorded_at', { ascending: false })
           .limit(20),
         supabase
           .from('biometric_reading')
           .select('heart_rate, grip_pressure, recorded_at')
           .eq('session_id', sessionId)
-          .order('recorded_at', { ascending: true })
+          .order('recorded_at', { ascending: false })
           .limit(10),
       ])
 
@@ -137,11 +142,19 @@ export async function POST(req: Request) {
       const usingStubSentiment = classification === null
       const emotionLabel = classification?.label ?? 'neutral'
 
-      const ventingIntensities = (ventRows ?? []).map((r: { intensity_score: number }) => Number(r.intensity_score))
-      const biometricStressScores = (bioRows ?? []).map(
-        (r: { heart_rate: number | null; grip_pressure: number | null }) =>
-          classifyBiometrics(r.heart_rate, r.grip_pressure).stressScore,
-      )
+      // .reverse() restores chronological order — the queries above fetch
+      // newest-first to get a RECENT window, but trendSignal expects oldest-first.
+      const ventingIntensities = (ventRows ?? [])
+        .slice()
+        .reverse()
+        .map((r: { intensity_score: number }) => Number(r.intensity_score))
+      const biometricStressScores = (bioRows ?? [])
+        .slice()
+        .reverse()
+        .map(
+          (r: { heart_rate: number | null; grip_pressure: number | null }) =>
+            classifyBiometrics(r.heart_rate, r.grip_pressure).stressScore,
+        )
       const sessionDurationSeconds = sessionRow?.start_time
         ? (Date.now() - new Date(sessionRow.start_time).getTime()) / 1000
         : undefined

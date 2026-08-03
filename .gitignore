@@ -51,7 +51,15 @@ next-env.d.ts
 paper/
 docs/lit-review-final.md
 
-# Regenerable figure data — produced by scripts/generate-fig3.js, which IS
-# tracked. Committing the output invites a stale copy diverging from whatever
-# interval the figure was actually plotted at.
+# Regenerable figure ARTEFACTS. The scripts that produce them (generate-fig3.js,
+# plot-fig3.py) ARE tracked, so anyone can rebuild these from the live data.
+# Committing the outputs invites a stale copy diverging from whatever run the
+# paper was actually plotted from — and the figures belong with the manuscript
+# in Overleaf, not in the code repo.
+# Wildcards, not a fixed list — an earlier explicit list named
+# fig_architecture.pdf while the actual export was a .png, so it slipped
+# through. These patterns have no leading slash, so they match at any depth.
 fig3-data.json
+fig_*.pdf
+fig_*.png
+fig_*.svg

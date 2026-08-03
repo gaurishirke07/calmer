@@ -1014,12 +1014,19 @@ export function AngerReleaseGame(){
   // NB: the legacy game_sessions write was removed — the game now persists to
   // the unified schema (session / venting_interaction / emotional_state) via
   // the telemetry helpers above. Dashboard/analytics reconciliation is P6.
+  // Derive the countdown from the WALL CLOCK rather than decrementing a counter.
+  // A per-tick counter drifts from Date.now() because browsers throttle
+  // setInterval in background tabs, and the readiness score reads the wall
+  // clock. That made the displayed timer and the score disagree, and — worse —
+  // meant the "enforced" cap fired after 120 ticks rather than 120 seconds.
   useEffect(()=>{
     if(phase!=='playing')return
-    const t=setInterval(()=>setTimeLeft(prev=>{
-      if(prev<=1){setPhase('over');phaseRef.current='over';return 0}
-      return prev-1
-    }),1000)
+    const t=setInterval(()=>{
+      const elapsed=(Date.now()-gameStartTimeRef.current)/1000
+      const remaining=Math.max(0,Math.ceil(MAX_VENT_SECONDS-elapsed))
+      setTimeLeft(remaining)
+      if(remaining<=0){setPhase('over');phaseRef.current='over'}
+    },1000)
     return()=>clearInterval(t)
   },[phase])
 

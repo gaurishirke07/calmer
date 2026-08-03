@@ -98,10 +98,16 @@ async function trajectory(sid) {
   return r.json()
 }
 
+function summarise(label, points) {
+  const sig = [...new Set(points.flatMap((p) => p.signals_used || []))].join('+')
+  console.log(`${label.padEnd(18)}: ${String(points.length).padStart(3)} snapshots | ${sig}`)
+  console.log(`  first ${Number(points[0]?.readiness_score).toFixed(2)}  ->  final ${Number(points.at(-1)?.readiness_score).toFixed(2)}`)
+}
+
 ;(async () => {
   const out = {}
 
-  // ── B. sensing attached ────────────────────────────────────────────────────
+  // ── B. sensing attached — driven through the real ingest route ─────────────
   const withHw = await newSession('fig3 sensing attached')
   for (let i = 0; i < VENT_PROFILE.length; i++) {
     await ventTick(withHw, VENT_PROFILE[i])
@@ -109,15 +115,21 @@ async function trajectory(sid) {
     await new Promise((r) => setTimeout(r, INTERVAL))
   }
   out.sensingAttached = { session: withHw, points: await trajectory(withHw) }
+  summarise('sensing attached', out.sensingAttached.points)
 
-  console.log('sensing attached :', out.sensingAttached.points.length, 'snapshots ->', withHw)
-  console.log('  final readiness:', out.sensingAttached.points.at(-1)?.readiness_score)
-  console.log('  signals        :', JSON.stringify(out.sensingAttached.points.at(-1)?.signals_used))
-  console.log('  corroborated   :', out.sensingAttached.points.at(-1)?.corroborated)
+  // ── A. software only — a REAL rage-room session played in the browser.
+  // Not synthesised: pass its UUID with --software-session so the comparison
+  // is against genuine gameplay rather than a replay of our own profile.
+  const swIdx = argv.indexOf('--software-session')
+  if (swIdx !== -1 && argv[swIdx + 1]) {
+    const sid = argv[swIdx + 1]
+    out.softwareOnly = { session: sid, points: await trajectory(sid) }
+    summarise('software only', out.softwareOnly.points)
+  } else {
+    console.log('\nsoftware only     : SKIPPED — pass --software-session <UUID> of a real')
+    console.log('                    rage-room session to include the comparison arm.')
+  }
 
   fs.writeFileSync(path.join(__dirname, '..', 'fig3-data.json'), JSON.stringify(out, null, 2))
-  console.log('\nwrote fig3-data.json')
-  console.log('NOTE: the software-only arm comes from playing a real rage-room session')
-  console.log('      in the browser; its emotional_state rows carry signals_used')
-  console.log('      ["ventingTrend","sessionContext"] with no biometricTrend.')
+  console.log('\nwrote fig3-data.json  ->  now run: python scripts/plot-fig3.py')
 })()
