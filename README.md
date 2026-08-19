@@ -11,6 +11,8 @@ The research contribution is a continuous, multi-signal **readiness score** that
 
 ## Architecture
 
+![CALMER architecture: four weighted signals fuse into one readiness score, renormalised over whichever are present, gating the handoff into the reflective and safety layer; all components write to one shared session record.](docs/architecture.png)
+
 | Layer | What it does |
 |---|---|
 | **Unified schema** (`scripts/003`) | `session` is the hub; `emotional_state` is the pivot (readiness snapshots); `venting_interaction` (Module 1), `therapist_convo` (Module 2), `biometric_reading` + `hardware_device` (hardware), `safety_flag` (crisis). |
