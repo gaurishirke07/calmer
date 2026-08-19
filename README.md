@@ -14,7 +14,7 @@ The research contribution is a continuous, multi-signal **readiness score** that
 | Layer | What it does |
 |---|---|
 | **Unified schema** (`scripts/003`) | `session` is the hub; `emotional_state` is the pivot (readiness snapshots); `venting_interaction` (Module 1), `therapist_convo` (Module 2), `biometric_reading` + `hardware_device` (hardware), `safety_flag` (crisis). |
-| **Readiness fusion** (`lib/calmer/readiness.ts`) | `computeReadinessScore` weight-fuses available signals and renormalizes; `classifyBiometrics` maps HR/pressure to a stress score; `corroborateBiometricTransition` blocks single-threshold transitions. |
+| **Readiness fusion** (`lib/calmer/readiness.ts`) | `computeReadinessScore` weight-fuses available signals and renormalizes; `classifyBiometrics` maps HR/pressure to a stress score; `corroborateBiometricTransition` evaluates whether a biometric-only decline is corroborated by a non-biometric signal and records the verdict per snapshot. |
 | **Sentiment** (`lib/calmer/emotion-classifier.ts`) | j-hartmann emotion classifier via the HF Inference router; loud lexicon-stub fallback (never silent). |
 | **Safety** (`lib/calmer/safety.ts`) | Layered crisis detection: lexical pre-filter + LLM risk check, combined conservatively; safety-mode reply and a persisted `safety_flag`. |
 | **Cross-module fusion** | One `session` spans venting **and** chat: the rage room's `session_id` is carried into `/chat?session=...`, so chat readiness fuses venting history with text sentiment. |
@@ -90,7 +90,7 @@ Walk the flow: sign up → rage room → **Find Peace** → chat → dashboard. 
 
 ## Testing
 
-24 unit tests cover the pure logic the research claim rests on — score bounds, weight renormalization over any subset of signals, honest reporting of which signals contributed, biometric classification bands, RMSSD, the layered safety combination, and the biometric corroboration rule. No DB or network required. Add tests alongside the code as `*.test.ts`.
+26 unit tests cover the pure logic the research claim rests on — score bounds, weight renormalization over any subset of signals, honest reporting of which signals contributed, biometric classification bands, RMSSD, the layered safety combination, and the biometric corroboration rule. No DB or network required. Add tests alongside the code as `*.test.ts`.
 
 ## CI
 
