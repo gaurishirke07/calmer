@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { createServiceClient } from '@/lib/supabase/service'
 import {
   classifyBiometrics,
@@ -13,8 +14,13 @@ export const runtime = 'nodejs'
 // for per-device signed tokens (see HARDWARE_DEVICE.firmware_version /
 // last_calibrated fields) before any real-world deployment.
 function isAuthorized(req: Request) {
+  const expected = process.env.HARDWARE_INGEST_SECRET
   const secret = req.headers.get('x-hardware-secret')
-  return !!process.env.HARDWARE_INGEST_SECRET && secret === process.env.HARDWARE_INGEST_SECRET
+  if (!expected || !secret) return false
+  // Constant-time compare of fixed-length digests, so response timing can't
+  // leak how much of a guessed secret was right.
+  const digest = (v: string) => createHash('sha256').update(v).digest()
+  return timingSafeEqual(digest(secret), digest(expected))
 }
 
 export async function POST(req: Request) {
@@ -87,6 +93,7 @@ export async function POST(req: Request) {
       .from('hardware_device')
       .select('id')
       .eq('device_label', body.device_label)
+      .is('user_id', null) // only devices this route registered (migration 013)
       .maybeSingle()
     if (existing) {
       deviceId = existing.id

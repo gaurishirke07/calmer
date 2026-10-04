@@ -13,8 +13,10 @@ export async function GET() {
 
     const categorized = await getUserSessionsGrouped(supabase, user.id)
     return NextResponse.json({ sessions: categorized })
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    // Log the detail server-side; never send DB/driver messages to the browser.
+    console.error('[api/sessions]', error)
+    return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 })
   }
 }
 
@@ -36,7 +38,9 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ session })
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    // Log the detail server-side; never send DB/driver messages to the browser.
+    console.error('[api/sessions]', error)
+    return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 })
   }
 }

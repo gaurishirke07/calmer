@@ -15,10 +15,23 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // RLS returns no rows for a deleted or foreign session, which would look
+    // like an empty chat; say so, so the client can start a fresh one.
+    const { data: owned } = await supabase
+      .from('session')
+      .select('id')
+      .eq('id', sessionId)
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (!owned) {
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 })
+    }
+
     const messages = await getSessionMessages(supabase, user.id, sessionId)
     return NextResponse.json({ messages })
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    console.error('Error loading session:', error)
+    return NextResponse.json({ error: 'Could not load session' }, { status: 500 })
   }
 }
 
@@ -42,8 +55,10 @@ export async function PATCH(
 
     const success = await renameSession(supabase, user.id, sessionId, title)
     return NextResponse.json({ success })
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    // Log the detail server-side; never send DB/driver messages to the browser.
+    console.error('[api/sessions/[id]]', error)
+    return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 })
   }
 }
 
@@ -62,7 +77,9 @@ export async function DELETE(
 
     const success = await deleteSession(supabase, user.id, sessionId)
     return NextResponse.json({ success })
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    // Log the detail server-side; never send DB/driver messages to the browser.
+    console.error('[api/sessions/[id]]', error)
+    return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 })
   }
 }

@@ -57,9 +57,12 @@ export const CHAT_UNAVAILABLE_REPLY = `I couldn't respond just now — something
  * level. Conservative — takes the higher of the two signals.
  */
 export function combineRisk(keywordTriggered: boolean, llmVerdict: string | null): RiskLevel {
-  const v = (llmVerdict ?? '').trim().toUpperCase()
-  if (keywordTriggered || v.includes('HIGH')) return 'high'
-  if (v.includes('LOW')) return 'low'
+  // Whole words, as assessRisk parses them: a substring test read "ALLOWED"
+  // (e.g. in a provider error) as LOW. Garbage is handled by assessRisk's
+  // unavailable path, which adds the crisis line.
+  const v = llmVerdict ?? ''
+  if (keywordTriggered || /\bHIGH\b/i.test(v)) return 'high'
+  if (/\bLOW\b/i.test(v)) return 'low'
   return 'none'
 }
 

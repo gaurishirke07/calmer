@@ -13,8 +13,10 @@ export async function GET() {
 
     const memories = await getUserMemories(supabase, user.id)
     return NextResponse.json({ memories })
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    // Log the detail server-side; never send DB/driver messages to the browser.
+    console.error('[api/memories]', error)
+    return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 })
   }
 }
 
@@ -38,8 +40,10 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ memory })
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    // Log the detail server-side; never send DB/driver messages to the browser.
+    console.error('[api/memories]', error)
+    return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 })
   }
 }
 
@@ -61,7 +65,9 @@ export async function DELETE(req: Request) {
 
     const success = await deleteUserMemory(supabase, user.id, memoryId)
     return NextResponse.json({ success })
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  } catch (error) {
+    // Log the detail server-side; never send DB/driver messages to the browser.
+    console.error('[api/memories]', error)
+    return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 })
   }
 }

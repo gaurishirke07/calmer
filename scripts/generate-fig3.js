@@ -8,7 +8,9 @@
  * so the two `signals_used` sets can be compared directly.
  *
  * Requires: dev server on :3000, .env.local populated, migrations 001-010 run.
- * Usage:  node scripts/generate-fig3.js [USER_UUID] [--interval MS]
+ * Usage:  node scripts/generate-fig3.js <USER_UUID> [--interval MS]
+ *         USER_UUID must be a developer's own account: the run writes synthetic
+ *         sessions there (titled "fig3 ...", no trial arm).
  *
  * --interval controls wall-clock spacing between snapshots (default 150ms).
  * At the default the run finishes in seconds, but `sessionContext` barely
@@ -54,18 +56,16 @@ const ivIdx = argv.indexOf('--interval')
 const INTERVAL = ivIdx !== -1 ? parseInt(argv[ivIdx + 1], 10) : 150
 const USER_ID = argv[0] && !argv[0].startsWith('--') ? argv[0] : null
 
+// Synthetic sessions go only into an account named on the command line. It
+// used to borrow whichever user_id came first — possibly a participant's — and
+// stamp the session as a 'readiness'-arm trial session, which the MRT analysis
+// would then count. No arm now: these are not randomised decision points.
 async function newSession(label) {
-  let userId = USER_ID
-  if (!userId) {
-    const r = await fetch(U + '/rest/v1/session?select=user_id&limit=1', { headers: H })
-    const rows = await r.json()
-    if (!rows.length) throw new Error('No existing session to borrow a user_id from. Pass one: node scripts/generate-fig3.js <USER_UUID>')
-    userId = rows[0].user_id
-  }
+  if (!USER_ID) throw new Error('Pass your own account id: node scripts/generate-fig3.js <USER_UUID>')
   const r = await fetch(U + '/rest/v1/session', {
     method: 'POST',
     headers: { ...H, Prefer: 'return=representation' },
-    body: JSON.stringify({ user_id: userId, status: 'active', mrt_condition: 'readiness', title: label }),
+    body: JSON.stringify({ user_id: USER_ID, status: 'active', title: label }),
   })
   return (await r.json())[0].id
 }
@@ -123,8 +123,9 @@ function summarise(label, points) {
   const swIdx = argv.indexOf('--software-session')
   if (swIdx !== -1 && argv[swIdx + 1]) {
     const sid = argv[swIdx + 1]
-    // Keep ONLY the game's own snapshots (source 'interaction'), which fuse
-    // venting + elapsed time and nothing else. The 2026-08-04 regeneration used
+    // Keep ONLY the game's own snapshots (source 'interaction'). Since
+    // 2026-10-04 those also fuse the sensor when one is connected, so the leak
+    // check below rejects any session that had a board attached. The 2026-08-04 regeneration used
     // a session that also had 302 biometric-route snapshots attached, so 88% of
     // the curve labelled "Software only" had biometrics fused in. Never again.
     const all = await trajectory(sid)

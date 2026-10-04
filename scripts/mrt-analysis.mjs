@@ -27,10 +27,13 @@
  * For binary outcomes, the log relative-risk estimator of Qian et al. 2021
  * (Biometrika 108:507-527) is the recommended sensitivity analysis.
  *
- * OFFER TIMES are reconstructed from stored readiness snapshots with the
- * CURRENT rule (sustained 3-reading crossing, 2026-10-03). Sessions recorded
- * before that used a single crossing; for a real trial, start enrolment after
- * the rule is frozen.
+ * OFFER TIMES. Sessions randomised by the database (session.randomised_by =
+ * 'db', migration 013) have an authoritative handoff_event log: an
+ * offer_shown row is the offer the user saw, and no such row means no offer.
+ * Older sessions have no log, so their offers are reconstructed from stored
+ * readiness snapshots with the CURRENT rule (sustained 3-reading crossing,
+ * 2026-10-03); older still used a single crossing. For a real trial, enrol
+ * only after the rule is frozen and 013 is run, and analyse 'db' sessions.
  *
  * Usage:   node --no-warnings scripts/mrt-analysis.mjs            analyse stored sessions
  *          node --no-warnings scripts/mrt-analysis.mjs --power    simulation power table
@@ -43,7 +46,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const P = 0.5 // randomisation probability (anger-release-game.tsx: Math.random() < 0.5)
+const P = 0.5 // randomisation probability (start_game_session() in migration 013: random() < 0.5)
 const THRESHOLD = 0.66 // CALM_THRESHOLD
 const TIMER_HANDOFF_SECONDS = 60 // control arm
 const ENGAGE_WINDOW_MS = 10 * 60 * 1000
@@ -127,14 +130,21 @@ async function all(path) {
     if (page.length < 1000) return out
   }
 }
-const [sessions, states, convo] = await Promise.all([
-  all('session?select=id,user_id,start_time,mrt_condition&order=start_time.asc'),
+const [sessions, states, convo, events] = await Promise.all([
+  // randomised_by exists only after migration 013
+  all('session?select=id,user_id,start_time,mrt_condition,randomised_by&order=start_time.asc')
+    .catch((e) => (String(e.message).includes('HTTP 400') ? all('session?select=id,user_id,start_time,mrt_condition&order=start_time.asc') : Promise.reject(e))),
   all('emotional_state?select=session_id,source,readiness_score,recorded_at&source=eq.interaction&order=recorded_at.asc'),
   all('therapist_convo?select=session_id,sender,created_at&sender=eq.user&order=created_at.asc'),
+  // Absent until migration 013 is run; then every session's offers are logged.
+  // a missing table (before 013) is a 404; any other failure must stop the run
+  all('handoff_event?select=session_id,event,recorded_at&order=recorded_at.asc,id.asc')
+    .catch((e) => (String(e.message).includes('HTTP 404') ? [] : Promise.reject(e))),
 ])
 const ms = (s) => new Date(s).getTime()
 const flushes = states.reduce((m, e) => ((m[e.session_id] ??= []).push(e), m), {})
 const userMsgs = convo.reduce((m, c) => ((m[c.session_id] ??= []).push(ms(c.created_at)), m), {})
+const offerLog = events.reduce((m, e) => ((m[e.session_id] ??= []).push(e), m), {})
 // every game session (randomised or not) for the re-vent outcome
 const gameStarts = sessions.filter((s) => flushes[s.id]?.length).map((s) => ({ user: s.user_id, id: s.id, t: ms(s.start_time) }))
 
@@ -150,7 +160,12 @@ for (const s of sessions) {
   const start = ms(s.start_time)
   const ventEnd = ms(f[f.length - 1].recorded_at)
   let offerAt = null
-  if (s.mrt_condition === 'readiness') {
+  const logged = s.randomised_by === 'db'
+  const log = offerLog[s.id] ?? []
+  if (logged) {
+    const shown = log.find((e) => e.event === 'offer_shown')
+    offerAt = shown ? ms(shown.recorded_at) : null
+  } else if (s.mrt_condition === 'readiness') {
     const hist = []
     for (const e of f) {
       hist.push(Number(e.readiness_score))
@@ -167,6 +182,9 @@ for (const s of sessions) {
     a: s.mrt_condition === 'readiness' ? 1 : 0,
     offered: offerAt !== null,
     offerSecs: offerAt === null ? null : (offerAt - start) / 1000,
+    offerSource: logged ? 'logged' : 'replayed',
+    // only knowable from the log: did they take the offer itself?
+    accepted: logged ? (log.some((e) => e.event === 'offer_accepted') ? 1 : 0) : null,
     engaged,
     revent,
     ventSecs: (ventEnd - start) / 1000,
@@ -189,6 +207,8 @@ const results = {
         sessions: ps.length,
         offeredRate: mean(ps.map((p) => (p.offered ? 1 : 0))),
         medianOfferSecs: ps.filter((p) => p.offered).map((p) => p.offerSecs).sort((x, y) => x - y)[Math.floor(ps.filter((p) => p.offered).length / 2)] ?? null,
+        loggedSessions: ps.filter((p) => p.offerSource === 'logged').length,
+        acceptedRate: mean(ps.filter((p) => p.offered && p.accepted !== null).map((p) => p.accepted)),
         engagedRate: mean(ps.map((p) => p.engaged)),
         reventRate: mean(ps.map((p) => p.revent)),
         meanVentSecs: mean(ps.map((p) => p.ventSecs)),
@@ -204,7 +224,7 @@ const f = (x, d = 2) => (x === null || x === undefined ? 'n/a' : Number(x).toFix
 console.log(`\nMRT ANALYSIS — ${results.decisionPoints} randomised sessions from ${results.participants} participant(s)`)
 console.log(`!! ${results.warning}\n`)
 for (const [name, b] of Object.entries(results.byArm)) {
-  console.log(`  ${name.padEnd(9)} sessions ${String(b.sessions).padStart(3)}  offered ${f(100 * b.offeredRate, 0)}% (median at ${f(b.medianOfferSecs, 0)} s)  engaged ${f(100 * b.engagedRate, 0)}%  re-vent ${f(100 * b.reventRate, 0)}%  mean venting ${f(b.meanVentSecs, 0)} s`)
+  console.log(`  ${name.padEnd(9)} sessions ${String(b.sessions).padStart(3)} (${b.loggedSessions} logged)  offered ${f(100 * b.offeredRate, 0)}% (median at ${f(b.medianOfferSecs, 0)} s, accepted ${b.acceptedRate === null ? 'n/a' : f(100 * b.acceptedRate, 0) + '%'})  engaged ${f(100 * b.engagedRate, 0)}%  re-vent ${f(100 * b.reventRate, 0)}%  mean venting ${f(b.meanVentSecs, 0)} s`)
 }
 console.log('\nCAUSAL EXCURSION EFFECT (readiness rule minus timer), WCLS')
 for (const [name, e] of Object.entries(results.effects)) {

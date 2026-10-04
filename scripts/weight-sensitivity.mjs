@@ -91,7 +91,7 @@ const [sessions, ventRows, bioRows, stateRows] = await Promise.all([
   all('session?select=id,start_time,mrt_condition&order=start_time.asc'),
   all('venting_interaction?select=session_id,input_type,intensity_score,recorded_at&order=recorded_at.asc'),
   all('biometric_reading?select=session_id,device_id,heart_rate,grip_pressure,recorded_at&order=recorded_at.asc'),
-  all('emotional_state?select=session_id,source,readiness_score,sentiment_score,recorded_at&order=recorded_at.asc'),
+  all('emotional_state?select=session_id,source,readiness_score,sentiment_score,signals_used,recorded_at&order=recorded_at.asc'),
 ])
 const bySession = (rows) => rows.reduce((m, r) => ((m[r.session_id] ??= []).push(r), m), {})
 const V = bySession(ventRows)
@@ -135,9 +135,13 @@ function replay(s) {
       ventingSessionPeak: ventAll.length ? Math.max(...ventAll) : undefined,
       sessionDurationSeconds: (t - start) / 1000,
     }
-    if (kind !== 'game') {
+    // Game rows fuse the sensor only since 2026-10-04 (and only when one is
+    // connected); follow what each row recorded so older rows replay exactly.
+    if (kind !== 'game' || (e.signals_used ?? []).includes('biometricTrend')) {
       const b = upTo(bio, t, kind === 'biometric' ? 21 : 10)
       if (b.length) inputs.biometricStressScores = b
+    }
+    if (kind !== 'game') {
       const se = upTo(sent, t, kind === 'biometric' ? 10 : 11)
       if (se.length) inputs.sentimentScores = se
     }

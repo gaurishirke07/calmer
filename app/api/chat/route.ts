@@ -1,6 +1,8 @@
-import { streamText, convertToModelMessages, generateText } from 'ai'
+import { streamText, generateText } from 'ai'
 import { createClient } from '@/lib/supabase/server'
 import { chatModel } from '@/lib/calmer/chat-model'
+import { sanitizeHistory } from '@/lib/calmer/chat-history'
+import { createNewSession } from '@/lib/services/session'
 import { getUserMemories, formatMemoriesForPrompt, autoExtractMemoriesFromMessage } from '@/lib/services/memory'
 import { classifyEmotion } from '@/lib/calmer/emotion-classifier'
 import {
@@ -34,33 +36,38 @@ export async function POST(req: Request) {
     }
 
     if (!process.env.GROQ_API_KEY) {
-      return new Response('GROQ_API_KEY is missing from environment variables.', { status: 500 })
+      console.error('[chat] GROQ_API_KEY is not set')
+      return new Response('Chat is not configured.', { status: 500 })
     }
 
-    const body = await req.json()
-    const { messages } = body
+    const body = await req.json().catch(() => null)
     // One unified `session` id drives everything now (history, fusion, summary).
     // `calmerSessionId` is still accepted for backward-compat with the game handoff.
-    const sessionId: string | null = body.sessionId ?? body.calmerSessionId ?? null
+    let sessionId: string | null =
+      typeof body?.sessionId === 'string' ? body.sessionId
+      : typeof body?.calmerSessionId === 'string' ? body.calmerSessionId
+      : null
 
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return new Response('Messages array is required', { status: 400 })
+    // Text-only user/assistant turns rebuilt server-side; the risk check below
+    // reads the same text the model does (see lib/calmer/chat-history.ts).
+    const history = sanitizeHistory(body?.messages)
+    if (!history) {
+      return new Response('A user message is required.', { status: 400 })
     }
+    const userText = history[history.length - 1].content
 
-    // Extract last user message text (string or AI-SDK parts shape)
-    const lastUserMsg = [...messages].reverse().find((m: any) => m.role === 'user')
-    let userText = ''
-    if (lastUserMsg) {
-      if (typeof lastUserMsg.content === 'string' && lastUserMsg.content.length > 0) {
-        userText = lastUserMsg.content
-      } else if (Array.isArray(lastUserMsg.parts)) {
-        userText = lastUserMsg.parts
-          .filter((p: any) => p && p.type === 'text' && typeof p.text === 'string')
-          .map((p: any) => p.text)
-          .join(' ')
-      } else if (lastUserMsg.content) {
-        userText = String(lastUserMsg.content)
-      }
+    // A stale or foreign ?session= id used to pass straight through: every
+    // insert, including the safety flag, then failed RLS while the UI looked fine.
+    let sessionRow: { start_time: string | null; title: string | null; summary: string | null } | null = null
+    if (sessionId) {
+      const { data } = await supabase
+        .from('session')
+        .select('start_time, title, summary')
+        .eq('id', sessionId)
+        .eq('user_id', user.id)
+        .maybeSingle()
+      if (!data) return new Response('Session not found.', { status: 404 })
+      sessionRow = data
     }
 
     const model = chatModel()
@@ -92,6 +99,14 @@ export async function POST(req: Request) {
     }
     const safetyMode = risk === 'high'
 
+    // A flagged message must always leave a safety_flag row, and that needs a
+    // session. If the client's session create failed, make one here.
+    if (risk !== 'none' && !sessionId) {
+      const created = await createNewSession(supabase, user.id, userText.slice(0, 40))
+      if (created) sessionId = created.id
+      else console.error('[chat] could not create a session to hold a safety flag')
+    }
+
     // Persistent-companion memory: only from messages the risk check actually
     // ran on AND cleared. A flagged message — or one we could not check — is
     // never turned into a memory that would be replayed into every future chat.
@@ -106,9 +121,8 @@ export async function POST(req: Request) {
     // two minutes in the rage room, so the handoff feels like a cold restart.
     let ventingContext = ''
     if (sessionId && userText) {
-      // Pull the session + this session's venting/biometric history in one round.
-      const [{ data: sessionRow }, { data: ventRows }, { data: bioRows }, { data: sentRows }, { data: peakRows }] = await Promise.all([
-        supabase.from('session').select('start_time, title, summary').eq('id', sessionId).maybeSingle(),
+      // This session's venting/biometric/sentiment history in one round.
+      const [{ data: ventRows }, { data: bioRows }, { data: sentRows }, { data: peakRows }] = await Promise.all([
         // DESCENDING + limit, then reversed below. Ascending + limit returns the
         // OLDEST N, which froze the trend at the start of the session — the
         // moment the user was most activated. Invisible while sessions had
@@ -202,7 +216,9 @@ export async function POST(req: Request) {
         sessionDurationSeconds,
         usingStubSentiment,
       })
-      const source = signalsUsed.length > 1 ? 'fused' : 'text'
+      // 'fused' only when something besides the text joined in: elapsed time is
+      // always present, so counting signals made every chat row 'fused'.
+      const source = signalsUsed.some((k) => k !== 'sentiment' && k !== 'sessionContext') ? 'fused' : 'text'
 
       // Only when this session actually has a venting stage behind it.
       if (ventingIntensities.length > 0) {
@@ -249,9 +265,6 @@ export async function POST(req: Request) {
     const userMemories = await getUserMemories(supabase, user.id)
     const formattedMemories = formatMemoriesForPrompt(userMemories)
 
-    // Limit to last 10 messages for token economy / relevance
-    const recentMessages = messages.slice(-10)
-
     // On HIGH risk, replace normal therapy with the safety-mode reply.
     const systemPrompt = safetyMode
       ? SAFETY_MODE_SYSTEM
@@ -276,9 +289,9 @@ Guidelines:
     const result = streamText({
       model,
       system: systemPrompt,
-      messages: await convertToModelMessages(recentMessages),
+      messages: history,
       onFinish: async ({ text }) => {
-        if (!sessionId || !text) return
+        if (!sessionId || !text) return // sessionId is the validated (or server-created) one
         const { error } = await supabase.from('therapist_convo').insert({
           session_id: sessionId,
           sender: 'assistant',
@@ -298,8 +311,8 @@ Guidelines:
         return CHAT_UNAVAILABLE_REPLY
       },
     })
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error in chat API route:', error)
-    return new Response(error?.message || 'Internal Server Error', { status: 500 })
+    return new Response('Internal Server Error', { status: 500 })
   }
 }

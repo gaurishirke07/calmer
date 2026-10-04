@@ -232,6 +232,8 @@ describe('combineRisk (layered safety)', () => {
   it('is none for ordinary messages', () => {
     expect(combineRisk(false, 'NONE')).toBe('none')
     expect(combineRisk(false, null)).toBe('none')
+    // whole words only: "allowed" in an error string is not a LOW verdict
+    expect(combineRisk(false, 'ERROR: request not allowed')).toBe('none')
   })
 })
 

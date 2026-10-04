@@ -2,11 +2,12 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { createClient } from '@/lib/supabase/client'
-import { computeReadinessScore, shouldOfferHandoff, type SignalContribution, type StressLevel } from '@/lib/calmer/readiness'
+import { classifyBiometrics, computeReadinessScore, shouldOfferHandoff, type SignalContribution, type StressLevel } from '@/lib/calmer/readiness'
 import { ReadinessDashboard } from '@/components/calmer/readiness-dashboard'
 import { FaceTracker } from '@/components/calmer/face-tracker'
 import { VoiceTracker } from '@/components/calmer/voice-tracker'
 import { GestureController } from '@/components/calmer/gesture-controller'
+import { TRIAL_MODE } from '@/lib/calmer/trial-mode'
 import Link from 'next/link'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -58,10 +59,9 @@ const VX=W/2,VY=CEIL_Y-30
 const MAX_VENT_SECONDS = 120        // hard cap on the venting phase
 const CALM_THRESHOLD = 0.66         // readiness at which reflection is offered
 const TIMER_HANDOFF_SECONDS = 60    // control arm: offer at a fixed time instead
-// Trial mode (NEXT_PUBLIC_CALMER_TRIAL_MODE=1): hides the opt-in face/voice/
-// gesture toggles so every participant receives the same intervention — the
-// four-signal rule the trial evaluates. Read at build time (NEXT_PUBLIC_*).
-const TRIAL_MODE = process.env.NEXT_PUBLIC_CALMER_TRIAL_MODE === '1'
+// Trial mode (lib/calmer/trial-mode.ts) also hides the Calm Meter and the
+// readiness-keyed end message here: otherwise timer-arm participants would see
+// the readiness cue the trial compares against.
 
 // ── Safe helpers ───────────────────────────────────────────────────────────────
 const safeR = (r:number)=>Math.max(0.01,r)
@@ -300,6 +300,13 @@ export function AngerReleaseGame(){
   // (score crosses CALM_THRESHOLD) vs 'timer' (fixed-time control). Randomised
   // per session + logged, so the transition rule can be evaluated. [Klasnja 2015]
   const handoffConditionRef=useRef<'readiness'|'timer'>('readiness')
+  // What was last logged for this session's offer, so each show/withdraw is
+  // recorded once (migration 013's handoff_event).
+  const offerLoggedRef=useRef(false)
+  // Bumped by every startGame, so a flush still in flight from the previous
+  // session can't score the new session's (reset) history.
+  const sessionGenRef=useRef(0)
+  const mountedRef=useRef(true)
 
   useEffect(()=>{weaponRef.current=weapon},[weapon])
   useEffect(()=>{ammoRef.current=ammo},[ammo])
@@ -975,13 +982,36 @@ export function AngerReleaseGame(){
   },[phase,drawObj,drawRagdoll,drawCursor])
 
   // ── CALMER telemetry helpers ────────────────────────────────────────────────
-  const createGameSession=useCallback(async():Promise<string|null>=>{
+  const createGameSession=useCallback(async():Promise<{id:string,arm:'readiness'|'timer'}|null>=>{
     const supabase=createClient()
     const{data:{user}}=await supabase.auth.getUser()
     if(!user)return null
-    const{data,error}=await supabase.from('session').insert({user_id:user.id,status:'active',mrt_condition:handoffConditionRef.current}).select('id').single()
+    // The database draws the trial arm (migration 013), so the browser can't
+    // choose or change it. Until 013 is run, fall back to the client's draw.
+    const{data:started,error:rpcError}=await supabase.rpc('start_game_session').single<{session_id:string;arm:'readiness'|'timer'}>()
+    if(!rpcError&&started)return{id:started.session_id,arm:started.arm}
+    // Fall back ONLY when the function doesn't exist yet (PGRST202). After 013
+    // the direct insert is refused anyway, so any other error must surface.
+    if(rpcError?.code!=='PGRST202'){console.error('[game] start_game_session failed:',rpcError?.message);return null}
+    console.warn('[game] start_game_session not found (run migration 013?), using the old insert')
+    const arm=handoffConditionRef.current
+    const{data,error}=await supabase.from('session').insert({user_id:user.id,status:'active',mrt_condition:arm}).select('id').single()
     if(error){console.error('[game] failed to create unified session:',error.message);return null}
-    return data.id as string
+    return{id:data.id as string,arm}
+  },[])
+
+  // Offer delivery, for the trial's descriptive outcomes (offer acceptance,
+  // timing). Fire-and-forget: a failed log must never block the game.
+  const logHandoffEvent=useCallback((event:'offer_shown'|'offer_withdrawn'|'offer_accepted'|'end_screen_chat')=>{
+    const sid=sessionIdRef.current
+    if(!sid)return
+    const last=readinessHistoryRef.current[readinessHistoryRef.current.length-1]
+    createClient().from('handoff_event').insert({
+      session_id:sid,
+      event,
+      readiness_score:last??null,
+      elapsed_seconds:(Date.now()-gameStartTimeRef.current)/1000,
+    }).then(({error})=>{if(error)console.error('[game] failed to log handoff_event (run migration 013?):',error.message)})
   },[])
 
   const flushVentingInteractions=useCallback(async()=>{
@@ -989,6 +1019,7 @@ export function AngerReleaseGame(){
     // run (before, this returned early and the panel waited forever), but
     // nothing is persisted.
     const sid=sessionIdRef.current
+    const gen=sessionGenRef.current
     const batch=pendingInteractionsRef.current
     pendingInteractionsRef.current=[]
     const supabase=sid?createClient():null
@@ -1019,15 +1050,34 @@ export function AngerReleaseGame(){
       }
     }
 
-    // Recompute readiness from the rolling intensity trend after each flush.
-    // Venting-only for now; it fuses with biometric/text automatically once
-    // those modules write emotional_state against the same session_id.
+    // The sensor's latest readings for this session, scored the way the chat
+    // route scores them. Before this the game (whose score drives the trial's
+    // handoff) never read biometric_reading at all. No sensor = no rows = the
+    // signal is absent and the score is unchanged.
+    let biometricStressScores:number[]=[]
+    if(supabase){
+      const{data:bioRows,error:bioError}=await supabase.from('biometric_reading')
+        .select('heart_rate, grip_pressure')
+        .eq('session_id',sid)
+        .order('recorded_at',{ascending:false})
+        .limit(10)
+      if(bioError)console.error('[game] failed to read biometric_reading:',bioError.message)
+      if(gen!==sessionGenRef.current)return // "Again" started a new session meanwhile
+      biometricStressScores=(bioRows??[]).slice().reverse()
+        .map((r:{heart_rate:number|null;grip_pressure:number|null})=>classifyBiometrics(r.heart_rate,r.grip_pressure).stressScore)
+        .filter((v):v is number=>v!==null)
+    }
+
+    // Recompute readiness after each flush: venting trend, the sensor (if
+    // connected), elapsed time, and the opt-in face/voice signals. Sentiment
+    // joins in chat, where there is text to score.
     const{readinessScore,stressLevel,signalsUsed,contributions}=computeReadinessScore({
       // Pass the WHOLE history, not a slice — trendSignal measures decline from
       // the session peak and does its own windowing. Slicing here hid the peak
       // and made a settled user look "flat" again.
       ventingIntensities:intensityHistoryRef.current,
       ventingSessionPeak:sessionPeakRef.current,
+      biometricStressScores,
       // only readings from the last 4 s; empty when the camera is off
       facialAffectScores:faceReadingsRef.current.filter(r=>Date.now()-r.t<=4000).map(r=>r.v),
       // empty when the mic is off -> the voice signal is absent
@@ -1043,7 +1093,9 @@ export function AngerReleaseGame(){
     // venting hard again. The timer arm is untouched (it offers on elapsed time).
     readinessHistoryRef.current.push(readinessScore)
     if(readinessHistoryRef.current.length>10)readinessHistoryRef.current.shift()
-    if(handoffConditionRef.current==='readiness')setShowHandoff(shouldOfferHandoff(readinessHistoryRef.current,CALM_THRESHOLD))
+    // Not after the session has ended: the end screen never shows the offer,
+    // so the final flush must not log one nobody saw.
+    if(handoffConditionRef.current==='readiness'&&phaseRef.current!=='over')setShowHandoff(shouldOfferHandoff(readinessHistoryRef.current,CALM_THRESHOLD))
     if(!supabase)return
     const{error:stateError}=await supabase.from('emotional_state').insert({
       session_id:sid,
@@ -1070,6 +1122,7 @@ export function AngerReleaseGame(){
     setShowThemePicker(false)
 
     // reset telemetry, then start the session + flush loop
+    sessionGenRef.current+=1
     sessionIdRef.current=null
     gameStartTimeRef.current=Date.now()
     pendingInteractionsRef.current=[]
@@ -1083,15 +1136,23 @@ export function AngerReleaseGame(){
     setLiveContribs([])
     setLiveStress('moderate')
     setHandoffSessionId(null)
+    offerLoggedRef.current=false // a fresh session: hiding the old offer is not a withdrawal
     setShowHandoff(false)
-    // randomise the handoff decision rule for this session (MRT hook)
+    // Provisional arm for logged-out play; signed-in play takes the arm the
+    // database draws in createGameSession.
     handoffConditionRef.current = Math.random() < 0.5 ? 'readiness' : 'timer'
 
     setPhase('playing');phaseRef.current='playing'
 
     // create the session after play starts so no network wait blocks the UI —
     // early actions are captured in pendingInteractionsRef and flush once the id lands
-    sessionIdRef.current=await createGameSession()
+    const gen=sessionGenRef.current
+    const created=await createGameSession()
+    // Left the page, or pressed "Again", while the session was being created:
+    // don't start a flush loop nothing will ever clear, or take its arm.
+    if(!mountedRef.current||gen!==sessionGenRef.current)return
+    if(created)handoffConditionRef.current=created.arm
+    sessionIdRef.current=created?.id??null
     setHandoffSessionId(sessionIdRef.current)
     if(flushTimerRef.current)clearInterval(flushTimerRef.current)
     flushTimerRef.current=setInterval(flushVentingInteractions,3000)
@@ -1115,8 +1176,11 @@ export function AngerReleaseGame(){
   // setInterval in background tabs, and the readiness score reads the wall
   // clock. That made the displayed timer and the score disagree, and — worse —
   // meant the "enforced" cap fired after 120 ticks rather than 120 seconds.
+  // Runs on the DESTROYED! screen too: the user is still in the session there
+  // (Reset Room continues it), and before this the 120 s cap stopped while the
+  // flush kept writing, so a session could run on indefinitely.
   useEffect(()=>{
-    if(phase!=='playing')return
+    if(phase!=='playing'&&phase!=='allClear')return
     const t=setInterval(()=>{
       const elapsed=(Date.now()-gameStartTimeRef.current)/1000
       const remaining=Math.max(0,Math.ceil(MAX_VENT_SECONDS-elapsed))
@@ -1129,7 +1193,7 @@ export function AngerReleaseGame(){
   // Control arm: offer the handoff at a fixed elapsed time (the readiness arm
   // offers it when the score crosses CALM_THRESHOLD, in flushVentingInteractions).
   useEffect(()=>{
-    if(phase!=='playing')return
+    if(phase!=='playing'&&phase!=='allClear')return
     if(handoffConditionRef.current==='timer'&&(MAX_VENT_SECONDS-timeLeft)>=TIMER_HANDOFF_SECONDS)setShowHandoff(true)
   },[phase,timeLeft])
 
@@ -1143,7 +1207,22 @@ export function AngerReleaseGame(){
     flushVentingInteractions()
   },[phase,flushVentingInteractions])
 
-  useEffect(()=>()=>{if(flushTimerRef.current)clearInterval(flushTimerRef.current)},[])
+  // On leaving the page (e.g. through the offer link), stop the loop and save
+  // the actions from the last partial flush window, which were dropped before.
+  useEffect(()=>{
+    mountedRef.current=true
+    return()=>{
+      mountedRef.current=false
+      if(flushTimerRef.current){clearInterval(flushTimerRef.current);flushTimerRef.current=null}
+      if(pendingInteractionsRef.current.length)flushVentingInteractions()
+    }
+  },[flushVentingInteractions])
+
+  useEffect(()=>{
+    if(showHandoff===offerLoggedRef.current)return
+    offerLoggedRef.current=showHandoff
+    logHandoffEvent(showHandoff?'offer_shown':'offer_withdrawn')
+  },[showHandoff,logHandoffEvent])
 
   // ── Weapon config ───────────────────────────────────────────────────────────
   const wCfg:{[k in WeaponType]:{emoji:string,label:string,color:string,count:number|string}}={
@@ -1154,6 +1233,17 @@ export function AngerReleaseGame(){
     molotov: {emoji:'🔥',label:'Molotov',color:'#dc2f02',count:ammo.molotov},
     chainsaw:{emoji:'⚙️',label:'Saw',   color:'#555',   count:ammo.chainsaw},
   }
+
+  // The score-driven (or timer) offer. Shown during play and on the DESTROYED!
+  // screen, so every logged offer_shown is one the user could actually see.
+  const handoffOffer=showHandoff&&(
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2">
+      <span className="text-xs text-emerald-200">You seem to be finding some calm — ready to reflect on it?</span>
+      <Link href={handoffSessionId?`/chat?session=${handoffSessionId}`:'/chat'} onClick={()=>logHandoffEvent('offer_accepted')}>
+        <span className="whitespace-nowrap rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-black hover:bg-emerald-400 transition-all">Talk it through 🕊️</span>
+      </Link>
+    </div>
+  )
 
   return(
     <div className="space-y-3" style={{fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
@@ -1223,9 +1313,9 @@ export function AngerReleaseGame(){
       )}
 
       {/* Calm Meter + score-driven handoff (Novelty #1, user-facing) */}
-      {phase==='playing'&&(
+      {phase==='playing'&&(!TRIAL_MODE||showHandoff)&&(
         <div className="rounded-xl border border-white/12 bg-black/40 p-3 backdrop-blur-sm space-y-2">
-          <div className="flex flex-col gap-3 sm:flex-row">
+          {!TRIAL_MODE&&<div className="flex flex-col gap-3 sm:flex-row">
             <ReadinessDashboard className="min-w-0 flex-1" contributions={liveContribs} readinessScore={readiness} stressLevel={liveStress} threshold={CALM_THRESHOLD}/>
             {(faceOn||voiceOn||gestureOn)&&(
               <div className="flex w-full flex-col gap-2 sm:w-40 sm:shrink-0">
@@ -1234,7 +1324,7 @@ export function AngerReleaseGame(){
                 {voiceOn&&<VoiceTracker onSample={onVoiceSample}/>}
               </div>
             )}
-          </div>
+          </div>}
           {/* Opt-in only: neither the camera nor the mic starts unless the user asks.
               Hidden entirely in trial mode, so every participant gets the same
               four-signal rule the trial evaluates (paper/MRT-PROTOCOL.md). */}
@@ -1252,14 +1342,7 @@ export function AngerReleaseGame(){
               {voiceOn?'🎙️ Turn mic off':'🎙️ Add voice signal (mic, on-device)'}
             </button>
           </div>}
-          {showHandoff&&(
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2">
-              <span className="text-xs text-emerald-200">You seem to be finding some calm — ready to reflect on it?</span>
-              <Link href={handoffSessionId?`/chat?session=${handoffSessionId}`:'/chat'}>
-                <span className="whitespace-nowrap rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-black hover:bg-emerald-400 transition-all">Talk it through 🕊️</span>
-              </Link>
-            </div>
-          )}
+          {handoffOffer}
         </div>
       )}
 
@@ -1311,6 +1394,7 @@ export function AngerReleaseGame(){
             <div className="text-6xl mb-3">🔥</div>
             <h2 className="text-4xl font-black text-orange-400 mb-2">DESTROYED!</h2>
             <p className="text-white/60 mb-7 text-center text-sm">Every last thing is wrecked. More?</p>
+            {handoffOffer&&<div className="mb-5 w-full max-w-md px-4">{handoffOffer}</div>}
             <div className="flex gap-3 mb-4">
               <Button onClick={resetRoom} className="bg-red-600 hover:bg-red-700 text-white font-black px-8 text-base">🔄 Reset Room</Button>
               <button onClick={()=>setShowThemePicker(p=>!p)} className="px-5 py-2 rounded-lg border border-white/30 text-white/70 hover:text-white text-sm font-semibold transition-all">🏠 New Room</button>
@@ -1337,11 +1421,11 @@ export function AngerReleaseGame(){
             <p className="text-white/45 mb-7 text-sm">Feel that weight lift?</p>
             {/* Closing feedback is about the regulation outcome and the
                 handoff — NOT about how much was destroyed. */}
-            <div className="grid grid-cols-2 gap-10 mb-8 text-center">
-              <div>
+            <div className={`grid ${TRIAL_MODE?'grid-cols-1':'grid-cols-2'} gap-10 mb-8 text-center`}>
+              {!TRIAL_MODE&&<div>
                 <p className="text-5xl font-black" style={{color:`hsl(${Math.round(readiness*120)},80%,60%)`}}>{Math.round(readiness*100)}%</p>
                 <p className="text-xs text-white/45 mt-1">CALM REACHED</p>
-              </div>
+              </div>}
               <div>
                 <p className="text-5xl font-black text-sky-400">{MAX_VENT_SECONDS-timeLeft}s</p>
                 <p className="text-xs text-white/45 mt-1">TIME SPENT</p>
@@ -1352,7 +1436,9 @@ export function AngerReleaseGame(){
                 Find Peace carries the SAME session_id into chat so readiness
                 keeps fusing across the vent→reflect handoff. */}
             <p className="max-w-sm text-center text-sm text-white/55 mb-5">
-              {readiness>=0.66
+              {TRIAL_MODE
+                ?'When you are ready, the AI companion is there to talk it through.'
+                :readiness>=0.66
                 ?"You're reading calmer than when you started — a good moment to talk it through."
                 :readiness>=0.33
                 ?'Still processing some of it — the AI companion can help you unpack what came up.'
@@ -1360,8 +1446,8 @@ export function AngerReleaseGame(){
             </p>
             <div className="flex gap-3">
               <Button onClick={()=>startGame(theme)} className="bg-red-600 hover:bg-red-700 text-white font-bold">Again 💢</Button>
-              <Link href={handoffSessionId?`/chat?session=${handoffSessionId}`:'/chat'}>
-                <Button className={`bg-blue-700 hover:bg-blue-800 text-white font-bold${readiness>=0.66?' animate-pulse':''}`}>Find Peace 🕊️</Button>
+              <Link href={handoffSessionId?`/chat?session=${handoffSessionId}`:'/chat'} onClick={()=>logHandoffEvent('end_screen_chat')}>
+                <Button className={`bg-blue-700 hover:bg-blue-800 text-white font-bold${!TRIAL_MODE&&readiness>=0.66?' animate-pulse':''}`}>Find Peace 🕊️</Button>
               </Link>
             </div>
           </div>
