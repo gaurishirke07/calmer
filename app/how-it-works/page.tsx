@@ -25,7 +25,7 @@ const steps = [
   {
     step: '04',
     title: 'Talk It Through',
-    description: 'Connect with our AI therapist chatbox. Share your thoughts, explore the root causes of your anger, and receive compassionate, evidence-based guidance.',
+    description: 'Talk with an AI companion. Share your thoughts, explore what is behind your anger, and get supportive prompts drawn from CBT and mindfulness techniques.',
     color: 'border-primary/50',
   },
   {
@@ -67,11 +67,11 @@ export default function HowItWorksPage() {
                 <p>
                   CALMER uses a two-phase approach: first, we provide a safe outlet for the physical 
                   energy of anger through our interactive game. Then, once your nervous system has 
-                  calmed, our AI therapist helps you process the underlying emotions.
+                  calmed, an AI companion helps you reflect on the underlying emotions.
                 </p>
                 <p>
-                  This approach is based on cognitive-behavioral principles and somatic therapy 
-                  techniques, adapted for accessible, private self-help.
+                  The approach draws on cognitive-behavioural and mindfulness ideas, adapted for 
+                  self-help. CALMER is not therapy and is not a substitute for professional care.
                 </p>
               </CardContent>
             </Card>
@@ -111,7 +111,7 @@ export default function HowItWorksPage() {
               </Link>
               <Link href="/chat">
                 <Button size="lg" variant="outline" className="w-full sm:w-auto bg-transparent">
-                  Talk to AI Therapist
+                  Talk It Through
                 </Button>
               </Link>
             </div>
