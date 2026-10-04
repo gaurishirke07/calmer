@@ -2,6 +2,7 @@ import React from "react"
 import type { Metadata, Viewport } from 'next'
 import { Inter, Geist_Mono } from 'next/font/google'
 import './globals.css'
+import { AuthHashHandler } from '@/components/auth/auth-hash-handler'
 
 const fontSans = Inter({ subsets: ["latin"], variable: "--font-sans" });
 const fontMono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono" });
@@ -26,6 +27,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`dark ${fontSans.variable} ${fontMono.variable}`}>
       <body className="font-sans antialiased min-h-screen">
+        <AuthHashHandler />
         {children}
       </body>
     </html>

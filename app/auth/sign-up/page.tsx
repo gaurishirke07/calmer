@@ -40,8 +40,9 @@ export default function SignUpPage() {
       email,
       password,
       options: {
-        emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ||
-          `${window.location.origin}/dashboard`,
+        // /auth/confirm completes the sign-in from the email link (before, the
+        // link dropped the user on /dashboard without a session).
+        emailRedirectTo: `${process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || window.location.origin}/auth/confirm?next=/dashboard`,
       },
     })
 
