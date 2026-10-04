@@ -8,8 +8,7 @@
 //
 // Setup (once):
 //   cd hardware
-//   npm init -y
-//   npm install serialport @serialport/parser-readline node-fetch@2
+//   npm install          (installs serialport + dotenv from hardware/package.json)
 //
 // Run:
 //   node serial-bridge.js --port COM5 --session <SESSION_UUID>

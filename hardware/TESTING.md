@@ -4,7 +4,7 @@
 
 By the end, squeezing a stress ball (with a heart-rate sensor on your finger) will push live readings into the CALMER web app, where they become part of a "readiness" score.
 
-> **Estimated time:** ~45–60 min the first time (wiring + flashing + first run). The software has **never been run with a real board before**, so budget time for small debugging.
+> **Estimated time:** ~45–60 min the first time (wiring + flashing + first run). A real board was first bench-tested on 2026-08-03 (sessions `e3013af8`, `fac02e45`), so the path works — budget time for wiring and sensor-contact issues. Known limit: the firmware prints one beat interval per 1 s loop and the bridge forwards one every 2 s, so heart-rate variability (RMSSD) is computed on skipped beats; treat HRV values as unreliable until that is fixed.
 
 ---
 

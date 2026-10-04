@@ -2,7 +2,7 @@
 
 Merged 23 Jul 2026 from `CALMER-rageroom__1_.zip` (**v1**) and `CALMER-rageroom-fixed.zip` (**v2**).
 
-**Nothing was deleted.** Where the two versions genuinely conflicted, v1 is active and v2's variant is preserved in `_v2-reference/` as `.bak` (so Next.js won't compile it).
+**Nothing was deleted at merge time.** Where the two versions genuinely conflicted, v1 is active and v2's variant was preserved in `_v2-reference/` as `.bak`. *(Historical note, 2026-10-04: that folder no longer exists — its telemetry graft was completed in the main code, so the `_v2-reference` paths below are kept only as a record.)*
 
 ---
 

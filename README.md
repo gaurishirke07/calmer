@@ -49,7 +49,7 @@ Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/
    ```
    `.env.local` is gitignored — never commit real keys, especially `SUPABASE_SERVICE_ROLE_KEY`. Do **not** leave placeholder duplicates in the file; dotenv keeps the last value.
 
-3. **Database** — run all twelve migrations **in numeric order** in the Supabase SQL editor:
+3. **Database** — run all fourteen migrations **in numeric order** in the Supabase SQL editor:
    ```
    001_create_calmer_tables.sql          # original tables
    002_upgrade_calmer_schema.sql         # user_memories + mood logs
@@ -63,6 +63,8 @@ Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/
    010_emotional_state_corroborated.sql  # biometric corroboration outcome
    011_venting_idle_input_type.sql       # persist idle ticks (shared venting history)
    012_drop_session_current_state_view.sql  # SECURITY: drop a view that bypassed RLS
+   013_study_integrity.sql               # DB-drawn trial arm, offer log, sensor rows via the API only
+   014_trusted_supporter.sql             # trusted person: aggregates-only view, user-sent alerts
    ```
    Then confirm RLS: as user A you must not be able to read user B's `session` rows.
 
@@ -97,7 +99,7 @@ Walk the flow: sign up → rage room → **Find Peace** → chat → dashboard. 
 
 ## Testing
 
-84 unit tests cover the pure logic the research claim rests on — score bounds, weight renormalization over any subset of signals, the session-peak venting trend, honest reporting of which signals contributed, biometric classification bands, RMSSD, the layered safety combination, the biometric corroboration rule, the sustained-calm handoff rule, and the per-signal contribution breakdown. No DB or network required. Add tests alongside the code as `*.test.ts`.
+The unit tests cover the pure logic the research claim rests on — score bounds, weight renormalization over any subset of signals, the session-peak venting trend, honest reporting of which signals contributed, biometric classification bands, RMSSD, the layered safety combination, the biometric corroboration rule, the sustained-calm handoff rule, the per-signal contribution breakdown, chat-history sanitising, the trusted-supporter digest and safe auth redirects. No DB or network required. Add tests alongside the code as `*.test.ts`.
 
 ## Research scripts
 
@@ -119,7 +121,7 @@ service-role key; outputs are gitignored). Run with `node --no-warnings scripts/
 
 ## Deployment (Vercel)
 
-Import the GitHub repo into Vercel and set the environment variables from `.env.example` in the project settings (`SUPABASE_SERVICE_ROLE_KEY` server-only). Next.js is auto-detected; no extra config needed.
+Import the GitHub repo into Vercel and set the environment variables from `.env.example` in the project settings (`SUPABASE_SERVICE_ROLE_KEY` server-only). Next.js is auto-detected; no extra config needed. Pushes to `main` redeploy only if the Vercel project is connected to the repo; migrations, environment variables and Supabase auth settings are never deployed by a push. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for ownership, Supabase settings, free-tier limits and a post-deploy smoke test.
 
 ## Project structure
 
@@ -129,6 +131,6 @@ components/     game/ (rage room), chat/, dashboard/, analytics/, ui/ (shadcn)
 lib/calmer/     readiness fusion + emotion classifier (the research core)
 lib/supabase/   client / server / service-role clients
 lib/services/   memory, analytics, emotion, session helpers
-scripts/        SQL migrations (run 001 → 012 in order)
+scripts/        SQL migrations (run 001 → 014 in order) + research scripts
 hardware/       Arduino sketch + serial bridge
 ```
