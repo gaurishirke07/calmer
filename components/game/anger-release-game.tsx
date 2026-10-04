@@ -2,7 +2,11 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { createClient } from '@/lib/supabase/client'
-import { computeReadinessScore } from '@/lib/calmer/readiness'
+import { computeReadinessScore, shouldOfferHandoff, type SignalContribution, type StressLevel } from '@/lib/calmer/readiness'
+import { ReadinessDashboard } from '@/components/calmer/readiness-dashboard'
+import { FaceTracker } from '@/components/calmer/face-tracker'
+import { VoiceTracker } from '@/components/calmer/voice-tracker'
+import { GestureController } from '@/components/calmer/gesture-controller'
 import Link from 'next/link'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -54,6 +58,10 @@ const VX=W/2,VY=CEIL_Y-30
 const MAX_VENT_SECONDS = 120        // hard cap on the venting phase
 const CALM_THRESHOLD = 0.66         // readiness at which reflection is offered
 const TIMER_HANDOFF_SECONDS = 60    // control arm: offer at a fixed time instead
+// Trial mode (NEXT_PUBLIC_CALMER_TRIAL_MODE=1): hides the opt-in face/voice/
+// gesture toggles so every participant receives the same intervention — the
+// four-signal rule the trial evaluates. Read at build time (NEXT_PUBLIC_*).
+const TRIAL_MODE = process.env.NEXT_PUBLIC_CALMER_TRIAL_MODE === '1'
 
 // ── Safe helpers ───────────────────────────────────────────────────────────────
 const safeR = (r:number)=>Math.max(0.01,r)
@@ -210,6 +218,9 @@ export function AngerReleaseGame(){
   const[timeLeft,setTimeLeft]=useState(120)
   // live readiness (Novelty #1) — recomputed on every telemetry flush
   const[readiness,setReadiness]=useState(0.5)
+  // live per-signal breakdown for the explainable-readiness panel
+  const[liveContribs,setLiveContribs]=useState<SignalContribution[]>([])
+  const[liveStress,setLiveStress]=useState<StressLevel>('moderate')
   // reactive copy of sessionIdRef for the handoff <Link> (refs aren't safe to
   // read during render); set once the unified session is created
   const[handoffSessionId,setHandoffSessionId]=useState<string|null>(null)
@@ -247,6 +258,43 @@ export function AngerReleaseGame(){
   const gameStartTimeRef=useRef<number>(0)
   const pendingInteractionsRef=useRef<{input_type:'tap'|'drag';intensity_score:number;target_label:string}[]>([])
   const intensityHistoryRef=useRef<number[]>([])
+  // highest intensity this session — the venting trend's reference point
+  // (distance below the SESSION peak), kept separately because the history
+  // above only holds the last 40 samples
+  const sessionPeakRef=useRef(0)
+  // OPT-IN webcam signal (off by default). Readings are timestamped so only the
+  // last few seconds count: a face that leaves the frame stops contributing
+  // instead of lingering. Turning the camera off clears the buffer.
+  const[faceOn,setFaceOn]=useState(false)
+  const faceReadingsRef=useRef<{t:number;v:number}[]>([])
+  const onFaceReading=useCallback((v:number|null)=>{
+    if(v===null)return // no face this tick; the 4 s window ages old readings out
+    faceReadingsRef.current.push({t:Date.now(),v})
+    if(faceReadingsRef.current.length>40)faceReadingsRef.current.shift()
+  },[])
+  // OPT-IN microphone signal (off by default): vocal-effort samples (0..100,
+  // every 500 ms) and their session peak — the same decline-from-peak rule as
+  // venting. Turning the mic off clears both, so the signal is simply absent.
+  const[voiceOn,setVoiceOn]=useState(false)
+  const voiceSamplesRef=useRef<number[]>([])
+  const voicePeakRef=useRef(0)
+  const onVoiceSample=useCallback((v:number)=>{
+    voiceSamplesRef.current.push(v)
+    if(voiceSamplesRef.current.length>40)voiceSamplesRef.current.shift()
+    voicePeakRef.current=Math.max(voicePeakRef.current,v)
+  },[])
+  const toggleVoice=useCallback(()=>{
+    voiceSamplesRef.current=[]
+    voicePeakRef.current=0
+    setVoiceOn(on=>!on)
+  },[])
+  const toggleFace=useCallback(()=>{
+    faceReadingsRef.current=[]
+    setFaceOn(on=>!on)
+  },[])
+  // recent readiness scores, one per flush — the handoff needs a SUSTAINED
+  // crossing, not a single tick above the threshold (see shouldOfferHandoff)
+  const readinessHistoryRef=useRef<number[]>([])
   const flushTimerRef  =useRef<ReturnType<typeof setInterval>|null>(null)
   // MRT hook: which decision rule offers the handoff this session — 'readiness'
   // (score crosses CALM_THRESHOLD) vs 'timer' (fixed-time control). Randomised
@@ -365,6 +413,8 @@ export function AngerReleaseGame(){
   const logInteraction=useCallback((intensity:number,label:string,inputType:'tap'|'drag'='tap')=>{
     intensityHistoryRef.current.push(intensity)
     if(intensityHistoryRef.current.length>40)intensityHistoryRef.current.shift()
+    // the history above is capped at 40; the peak is the whole session's
+    sessionPeakRef.current=Math.max(sessionPeakRef.current,intensity)
     pendingInteractionsRef.current.push({input_type:inputType,intensity_score:intensity,target_label:label})
   },[])
 
@@ -409,8 +459,10 @@ export function AngerReleaseGame(){
     mouseDown.current=true;const[cx,cy]=getXY(e);fireWeapon(cx,cy)
   },[getXY,fireWeapon])
   const handleMouseUp=useCallback(()=>{mouseDown.current=false},[])
-  const handleMouseMove=useCallback((e:React.MouseEvent<HTMLCanvasElement>)=>{
-    const[cx,cy]=getXY(e);mousePos.current={x:cx,y:cy}
+  // Pointer movement in canvas coordinates. Shared by the mouse and by gesture
+  // control, so a hand drives exactly the same cursor and chainsaw logic.
+  const moveTo=useCallback((cx:number,cy:number)=>{
+    mousePos.current={x:cx,y:cy}
     if(mouseDown.current&&weaponRef.current==='chainsaw'){
       const now=Date.now()
       if(now-lastSaw.current>75){
@@ -424,7 +476,19 @@ export function AngerReleaseGame(){
         }
       }
     }
-  },[getXY,applyHit,emit,logInteraction])
+  },[applyHit,emit,logInteraction])
+  const handleMouseMove=useCallback((e:React.MouseEvent<HTMLCanvasElement>)=>{
+    const[cx,cy]=getXY(e);moveTo(cx,cy)
+  },[getXY,moveTo])
+
+  // ── Gesture control (opt-in): the hand is just another pointer ─────────────
+  // aim -> moveTo; fist -> press (fireWeapon, same as a click); open -> release.
+  const[gestureOn,setGestureOn]=useState(false)
+  const onGestureAim=useCallback((p:{x:number;y:number})=>moveTo(p.x*W,p.y*H),[moveTo])
+  const onGesturePress=useCallback((p:{x:number;y:number})=>{
+    mouseDown.current=true;fireWeapon(p.x*W,p.y*H)
+  },[fireWeapon])
+  const onGestureRelease=useCallback(()=>{mouseDown.current=false},[])
 
   // ── Draw room object ────────────────────────────────────────────────────────
   const drawObj=useCallback((ctx:CanvasRenderingContext2D,obj:Obj3D,ts:number)=>{
@@ -941,21 +1005,40 @@ export function AngerReleaseGame(){
       // Push a zero sample so quiet time moves the trend instead of pausing it.
       intensityHistoryRef.current.push(0)
       if(intensityHistoryRef.current.length>40)intensityHistoryRef.current.shift()
+      // ...and PERSIST it. Previously the zero lived only in this tab's memory,
+      // so the chat and biometric routes — which rebuild the venting history
+      // from venting_interaction — saw only the hits and read a user who had
+      // calmed to 1.0 here as still sitting at their peak (0.24 on arrival in
+      // chat). Needs migration 011, which allows input_type 'idle'.
+      const{error}=await supabase.from('venting_interaction').insert({session_id:sid,input_type:'idle',intensity_score:0,target_label:'idle'})
+      if(error)console.error('[game] failed to save idle venting_interaction (run migration 011?):',error.message)
     }
 
     // Recompute readiness from the rolling intensity trend after each flush.
     // Venting-only for now; it fuses with biometric/text automatically once
     // those modules write emotional_state against the same session_id.
-    const{readinessScore,stressLevel,signalsUsed}=computeReadinessScore({
+    const{readinessScore,stressLevel,signalsUsed,contributions}=computeReadinessScore({
       // Pass the WHOLE history, not a slice — trendSignal measures decline from
       // the session peak and does its own windowing. Slicing here hid the peak
       // and made a settled user look "flat" again.
       ventingIntensities:intensityHistoryRef.current,
+      ventingSessionPeak:sessionPeakRef.current,
+      // only readings from the last 4 s; empty when the camera is off
+      facialAffectScores:faceReadingsRef.current.filter(r=>Date.now()-r.t<=4000).map(r=>r.v),
+      // empty when the mic is off -> the voice signal is absent
+      vocalIntensities:voiceSamplesRef.current,
+      vocalSessionPeak:voicePeakRef.current,
       sessionDurationSeconds:(Date.now()-gameStartTimeRef.current)/1000,
     })
     setReadiness(readinessScore)
-    // score-driven decision point: offer reflection once calm-enough
-    if(handoffConditionRef.current==='readiness'&&readinessScore>=CALM_THRESHOLD)setShowHandoff(true)
+    setLiveContribs(contributions)
+    setLiveStress(stressLevel)
+    // Score-driven decision point: offer reflection only once calm has HELD
+    // across consecutive flushes, and withdraw the offer if the user starts
+    // venting hard again. The timer arm is untouched (it offers on elapsed time).
+    readinessHistoryRef.current.push(readinessScore)
+    if(readinessHistoryRef.current.length>10)readinessHistoryRef.current.shift()
+    if(handoffConditionRef.current==='readiness')setShowHandoff(shouldOfferHandoff(readinessHistoryRef.current,CALM_THRESHOLD))
     const{error:stateError}=await supabase.from('emotional_state').insert({
       session_id:sid,
       readiness_score:readinessScore,
@@ -985,7 +1068,14 @@ export function AngerReleaseGame(){
     gameStartTimeRef.current=Date.now()
     pendingInteractionsRef.current=[]
     intensityHistoryRef.current=[]
+    sessionPeakRef.current=0
+    faceReadingsRef.current=[]
+    voiceSamplesRef.current=[]
+    voicePeakRef.current=0
+    readinessHistoryRef.current=[]
     setReadiness(0.5)
+    setLiveContribs([])
+    setLiveStress('moderate')
     setHandoffSessionId(null)
     setShowHandoff(false)
     // randomise the handoff decision rule for this session (MRT hook)
@@ -1129,14 +1219,33 @@ export function AngerReleaseGame(){
       {/* Calm Meter + score-driven handoff (Novelty #1, user-facing) */}
       {phase==='playing'&&(
         <div className="rounded-xl border border-white/12 bg-black/40 p-3 backdrop-blur-sm space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-white/55">Calm Meter</span>
-            <span className="text-xs font-bold" style={{color:`hsl(${Math.round(readiness*120)},80%,60%)`}}>{Math.round(readiness*100)}%</span>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <ReadinessDashboard className="min-w-0 flex-1" contributions={liveContribs} readinessScore={readiness} stressLevel={liveStress} threshold={CALM_THRESHOLD}/>
+            {(faceOn||voiceOn||gestureOn)&&(
+              <div className="flex w-full flex-col gap-2 sm:w-40 sm:shrink-0">
+                {gestureOn&&<GestureController onAim={onGestureAim} onPress={onGesturePress} onRelease={onGestureRelease}/>}
+                {faceOn&&<FaceTracker onReading={onFaceReading}/>}
+                {voiceOn&&<VoiceTracker onSample={onVoiceSample}/>}
+              </div>
+            )}
           </div>
-          <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
-            <div className="h-full rounded-full transition-all duration-700 ease-out"
-              style={{width:`${Math.round(readiness*100)}%`,backgroundColor:`hsl(${Math.round(readiness*120)},80%,55%)`}}/>
-          </div>
+          {/* Opt-in only: neither the camera nor the mic starts unless the user asks.
+              Hidden entirely in trial mode, so every participant gets the same
+              four-signal rule the trial evaluates (paper/MRT-PROTOCOL.md). */}
+          {!TRIAL_MODE&&<div className="flex flex-wrap gap-2">
+            <button onClick={()=>setGestureOn(on=>!on)} aria-pressed={gestureOn}
+              className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors ${gestureOn?'border-red-400/40 bg-red-400/10 text-red-200 hover:bg-red-400/20':'border-white/15 bg-white/5 text-white/60 hover:bg-white/10'}`}>
+              {gestureOn?'✊ Stop hand control':'✊ Smash with your hand (webcam)'}
+            </button>
+            <button onClick={toggleFace} aria-pressed={faceOn}
+              className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors ${faceOn?'border-red-400/40 bg-red-400/10 text-red-200 hover:bg-red-400/20':'border-white/15 bg-white/5 text-white/60 hover:bg-white/10'}`}>
+              {faceOn?'📷 Turn camera off':'📷 Add face signal (webcam, on-device)'}
+            </button>
+            <button onClick={toggleVoice} aria-pressed={voiceOn}
+              className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors ${voiceOn?'border-red-400/40 bg-red-400/10 text-red-200 hover:bg-red-400/20':'border-white/15 bg-white/5 text-white/60 hover:bg-white/10'}`}>
+              {voiceOn?'🎙️ Turn mic off':'🎙️ Add voice signal (mic, on-device)'}
+            </button>
+          </div>}
           {showHandoff&&(
             <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2">
               <span className="text-xs text-emerald-200">You seem to be finding some calm — ready to reflect on it?</span>
