@@ -17,19 +17,14 @@
 // NOTE (framing, per Barrett et al. 2019): treat this output as a NOISY
 // text-sentiment signal fused with others, never as ground-truth "emotion".
 
+import { EMOTION_VALENCE } from './affect-valence'
+
 const EMOTION_MODEL = 'j-hartmann/emotion-english-distilroberta-base'
 
 // sentiment score, -1 (distressed) .. +1 (calm/positive) — feeds
-// computeReadinessScore's `sentimentScores` input in lib/calmer/readiness.ts
-const EMOTION_SENTIMENT_MAP: Record<string, number> = {
-  anger: -0.8,
-  disgust: -0.6,
-  fear: -0.7,
-  sadness: -0.6,
-  neutral: 0,
-  surprise: 0.2,
-  joy: 1,
-}
+// computeReadinessScore's `sentimentScores` input in lib/calmer/readiness.ts.
+// The scale itself lives in affect-valence.ts, shared with the face signal.
+const EMOTION_SENTIMENT_MAP = EMOTION_VALENCE
 
 export interface EmotionClassification {
   label: string

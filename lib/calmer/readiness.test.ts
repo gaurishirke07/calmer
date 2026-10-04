@@ -4,8 +4,17 @@ import {
   classifyBiometrics,
   computeRMSSD,
   corroborateBiometricTransition,
+  shouldOfferHandoff,
+  NOMINAL_WEIGHTS,
 } from './readiness'
-import { combineRisk } from './safety'
+import {
+  CHAT_UNAVAILABLE_REPLY,
+  CRISIS_LINE,
+  RISK_CHECK_UNAVAILABLE_INSTRUCTION,
+  SAFETY_MODE_SYSTEM,
+  assessRisk,
+  combineRisk,
+} from './safety'
 
 describe('computeReadinessScore', () => {
   it('returns a neutral moderate score when no signals are present', () => {
@@ -32,6 +41,36 @@ describe('computeReadinessScore', () => {
   it('needs at least two points before a trend signal counts', () => {
     const r = computeReadinessScore({ ventingIntensities: [40] })
     expect(r.signalsUsed).not.toContain('ventingTrend')
+  })
+
+  // Paper §III: the venting trend is the distance below the SESSION peak. The
+  // history passed in is only a recent window, so the caller supplies the peak.
+  it('measures decline against the session peak, not just the window', () => {
+    // An early grenade (60) has scrolled out; the window holds steady bat hits.
+    const windowOnly = computeReadinessScore({ ventingIntensities: [10, 10, 10, 10] })
+    const withPeak = computeReadinessScore({ ventingIntensities: [10, 10, 10, 10], ventingSessionPeak: 60 })
+    expect(windowOnly.contributions[0].value).toBe(0) // reads "at peak"
+    expect(withPeak.contributions[0].value).toBeCloseTo(50 / 60, 10) // well below the real peak
+  })
+
+  it('keeps a long calm settled after the burst leaves the window', () => {
+    const r = computeReadinessScore({ ventingIntensities: [0, 0, 0, 0], ventingSessionPeak: 10 })
+    expect(r.signalsUsed).toContain('ventingTrend')
+    expect(r.contributions[0].value).toBe(1)
+  })
+
+  it('never uses a session peak below the window maximum', () => {
+    const r = computeReadinessScore({ ventingIntensities: [40, 10], ventingSessionPeak: 5 })
+    expect(r.contributions[0].value).toBeCloseTo(30 / 40, 10)
+  })
+
+  // Observed live: a user idling in the room before venting read ~0.05
+  // "activated", because an all-zero history has its "peak" at 0.
+  it('treats a history with no venting yet as no signal, not as activated', () => {
+    const r = computeReadinessScore({ ventingIntensities: [0, 0, 0, 0], sessionDurationSeconds: 20 })
+    expect(r.signalsUsed).not.toContain('ventingTrend')
+    expect(r.readinessScore).toBe(0.5) // only sessionContext left -> neutral guard
+    expect(r.stressLevel).toBe('moderate')
   })
 
   // The graceful-degradation claim: the score fuses ONLY the signals present
@@ -73,6 +112,46 @@ describe('computeReadinessScore', () => {
   })
 })
 
+// The explainable-readiness breakdown that the dashboard renders and the offline
+// weight study perturbs. The score is a black box without it.
+describe('computeReadinessScore — contributions breakdown', () => {
+  const CANON = ['ventingTrend', 'biometricTrend', 'sentiment', 'facialAffect', 'voiceTrend', 'sessionContext']
+
+  it('always returns every signal in canonical order', () => {
+    const r = computeReadinessScore({ ventingIntensities: [60, 20] })
+    expect(r.contributions.map((c) => c.key)).toEqual(CANON)
+  })
+
+  it('marks absent signals inactive and zeroed', () => {
+    const r = computeReadinessScore({ ventingIntensities: [60, 20] })
+    const bio = r.contributions.find((c) => c.key === 'biometricTrend')!
+    expect(bio.active).toBe(false)
+    expect(bio.value).toBeNull()
+    expect(bio.effectiveWeight).toBe(0)
+    expect(bio.contribution).toBe(0)
+  })
+
+  it('active contributions sum to the readiness score (normal path)', () => {
+    const r = computeReadinessScore({
+      ventingIntensities: [80, 20],
+      sentimentScores: [0.4],
+      sessionDurationSeconds: 90,
+    })
+    const sum = r.contributions.reduce((s, c) => s + c.contribution, 0)
+    expect(sum).toBeCloseTo(r.readinessScore, 10)
+  })
+
+  it('renormalises effective weights over present signals (they sum to 1)', () => {
+    const r = computeReadinessScore({ ventingIntensities: [80, 20], sentimentScores: [0.4] })
+    const active = r.contributions.filter((c) => c.active)
+    expect(active.map((c) => c.key)).toEqual(['ventingTrend', 'sentiment'])
+    expect(active.reduce((s, c) => s + c.effectiveWeight, 0)).toBeCloseTo(1, 10)
+    // ventingTrend keeps its 0.35 : 0.20 ratio against sentiment after renormalising
+    const venting = active.find((c) => c.key === 'ventingTrend')!
+    expect(venting.effectiveWeight).toBeCloseTo(0.35 / 0.55, 10)
+  })
+})
+
 describe('classifyBiometrics', () => {
   it('scores a calm resting reading as low stress', () => {
     const r = classifyBiometrics(75, 50)
@@ -93,15 +172,29 @@ describe('classifyBiometrics', () => {
   })
 
   it('treats bradycardia (<60 bpm) as atypical, not calm', () => {
-    // 0.4 bpm weight * 0.4 = 0.16 — non-zero even with no grip signal
+    // heart rate alone carries the reading (grip absent): its atypical score, 0.4
     const r = classifyBiometrics(50, null)
-    expect(r.stressScore).toBeCloseTo(0.16, 5)
+    expect(r.stressScore).toBeCloseTo(0.4, 5)
+    expect(r.stressClass).toBe('moderate')
   })
 
-  it('handles missing sensors without throwing', () => {
-    const r = classifyBiometrics(null, null)
-    expect(r.stressScore).toBe(0)
-    expect(r.stressClass).toBe('low')
+  // A missing channel used to enter as 0 — a perfectly calm heart — so a
+  // maximum squeeze with no pulse scored only 0.6. It now renormalises.
+  it('renormalises over the channel that is present', () => {
+    expect(classifyBiometrics(null, 1000).stressScore).toBe(1)
+    expect(classifyBiometrics(130, null).stressScore).toBeCloseTo(0.55, 10)
+  })
+
+  // Bench data: a misread 218 bpm used to score as maximal stress.
+  it('treats an implausible heart rate as unavailable, like a dropout', () => {
+    expect(classifyBiometrics(218, 50)).toEqual(classifyBiometrics(null, 50))
+    expect(classifyBiometrics(30, 50)).toEqual(classifyBiometrics(null, 50))
+    expect(classifyBiometrics(180, null).stressScore).toBe(1) // the ceiling itself is plausible
+  })
+
+  it('returns no reading — not "calm" — when no channel is usable', () => {
+    expect(classifyBiometrics(null, null)).toEqual({ stressScore: null, stressClass: null })
+    expect(classifyBiometrics(250, null)).toEqual({ stressScore: null, stressClass: null })
   })
 })
 
@@ -190,5 +283,91 @@ describe('corroborateBiometricTransition', () => {
       ventingIntensities: decliningVenting,
     })
     expect(r.corroborated).toBe(true)
+  })
+})
+
+// The handoff decision rule. Observed live: one quiet 3 s flush mid-venting
+// pushed readiness from ~0.05 to ~0.8 and fired the handoff while the user was
+// still smashing things. A single crossing must not be enough.
+describe('shouldOfferHandoff', () => {
+  const T = 0.66
+
+  it('does not fire on a single crossing', () => {
+    expect(shouldOfferHandoff([0.05, 0.05, 0.79], T)).toBe(false)
+  })
+
+  it('does not fire on a spike that falls back (the live failure case)', () => {
+    expect(shouldOfferHandoff([0.05, 0.78, 0.79, 0.1], T)).toBe(false)
+  })
+
+  it('fires once readiness has held above the threshold for three computations', () => {
+    expect(shouldOfferHandoff([0.3, 0.69, 0.83, 0.84], T)).toBe(true)
+  })
+
+  it('counts a score exactly at the threshold as calm-enough', () => {
+    expect(shouldOfferHandoff([0.66, 0.66, 0.66], T)).toBe(true)
+  })
+
+  it('withdraws the offer when the latest score drops back below', () => {
+    expect(shouldOfferHandoff([0.8, 0.85, 0.9, 0.2], T)).toBe(false)
+  })
+
+  it('needs at least minConsecutive scores', () => {
+    expect(shouldOfferHandoff([0.9, 0.9], T)).toBe(false)
+    expect(shouldOfferHandoff([0.9, 0.9], T, 2)).toBe(true)
+  })
+})
+
+// The offline weight-sensitivity study re-fuses with other weights; production
+// must keep using the priors.
+describe('computeReadinessScore — weight override (analysis only)', () => {
+  const inputs = { ventingIntensities: [80, 20], sentimentScores: [-0.6], sessionDurationSeconds: 60 }
+
+  it('defaults to the prior weights', () => {
+    expect(computeReadinessScore(inputs).readinessScore).toBe(
+      computeReadinessScore(inputs, { ...NOMINAL_WEIGHTS }).readinessScore,
+    )
+  })
+
+  it('re-fuses the same signals under different weights', () => {
+    const ventingHeavy = computeReadinessScore(inputs, { ventingTrend: 0.9, biometricTrend: 0, sentiment: 0.05, facialAffect: 0, voiceTrend: 0, sessionContext: 0.05 })
+    const sentimentHeavy = computeReadinessScore(inputs, { ventingTrend: 0.05, biometricTrend: 0, sentiment: 0.9, facialAffect: 0, voiceTrend: 0, sessionContext: 0.05 })
+    expect(ventingHeavy.readinessScore).toBeGreaterThan(sentimentHeavy.readinessScore) // venting calm, text angry
+    expect(ventingHeavy.contributions.map((c) => c.value)).toEqual(sentimentHeavy.contributions.map((c) => c.value))
+  })
+
+  it('exposes the priors read-only', () => {
+    expect(Object.isFrozen(NOMINAL_WEIGHTS)).toBe(true)
+    // the four PUBLISHED weights sum to 1; facialAffect is an opt-in extra
+    const published = ['ventingTrend', 'biometricTrend', 'sentiment', 'sessionContext'] as const
+    expect(published.reduce((a, k) => a + NOMINAL_WEIGHTS[k], 0)).toBeCloseTo(1, 10)
+  })
+})
+
+// Fail-safes: when the LLM risk check can't run, the system must not pass the
+// keyword-only result off as a clean check (keyword-only recall was 26.7%).
+describe('assessRisk (safety fail-safe)', () => {
+  it('flags the check as unavailable when the LLM call failed', () => {
+    expect(assessRisk(false, null)).toEqual({ risk: 'none', checkUnavailable: true })
+  })
+
+  it('treats an unparseable verdict as unavailable, not as a clean NONE', () => {
+    expect(assessRisk(false, 'I cannot help with that.')).toEqual({ risk: 'none', checkUnavailable: true })
+  })
+
+  it('accepts a real verdict', () => {
+    expect(assessRisk(false, 'NONE')).toEqual({ risk: 'none', checkUnavailable: false })
+    expect(assessRisk(false, ' low\n')).toEqual({ risk: 'low', checkUnavailable: false })
+  })
+
+  it('still escalates on a keyword hit when the LLM is down', () => {
+    expect(assessRisk(true, null)).toEqual({ risk: 'high', checkUnavailable: true })
+  })
+
+  it('carries the crisis line in every fail-safe text', () => {
+    for (const t of [SAFETY_MODE_SYSTEM, RISK_CHECK_UNAVAILABLE_INSTRUCTION, CHAT_UNAVAILABLE_REPLY]) {
+      expect(t).toContain(CRISIS_LINE)
+    }
+    expect(CRISIS_LINE).toContain('14416')
   })
 })

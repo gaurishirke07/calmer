@@ -1,6 +1,6 @@
 import { streamText, convertToModelMessages, generateText } from 'ai'
-import { createOpenAI } from '@ai-sdk/openai'
 import { createClient } from '@/lib/supabase/server'
+import { chatModel } from '@/lib/calmer/chat-model'
 import { getUserMemories, formatMemoriesForPrompt, autoExtractMemoriesFromMessage } from '@/lib/services/memory'
 import { classifyEmotion } from '@/lib/calmer/emotion-classifier'
 import {
@@ -9,15 +9,18 @@ import {
   detectSafetyTrigger,
   stubTextSentiment,
 } from '@/lib/calmer/readiness'
-import { SAFETY_CLASSIFIER_SYSTEM, SAFETY_MODE_SYSTEM, combineRisk, type RiskLevel } from '@/lib/calmer/safety'
+import {
+  CHAT_UNAVAILABLE_REPLY,
+  RISK_CHECK_UNAVAILABLE_INSTRUCTION,
+  SAFETY_CLASSIFIER_SYSTEM,
+  SAFETY_MODE_SYSTEM,
+  assessRisk,
+  type RiskLevel,
+} from '@/lib/calmer/safety'
 
 export const runtime = 'nodejs'
 
-// ── Model choice ─────────────────────────────────────────────────────────
-// Llama-3.3-70B via Groq's OpenAI-compatible API (drop-in for the ai-sdk
-// OpenAI client). Same open-weight, citable model, served free/fast with no
-// Meta-licence gate. Override with CALMER_CHAT_MODEL (must be a Groq model id).
-const DEFAULT_MODEL = 'llama-3.3-70b-versatile'
+// Model choice lives in lib/calmer/chat-model.ts (shared with the summary route).
 
 export async function POST(req: Request) {
   try {
@@ -60,30 +63,32 @@ export async function POST(req: Request) {
       }
     }
 
-    const groq = createOpenAI({
-      baseURL: 'https://api.groq.com/openai/v1',
-      apiKey: process.env.GROQ_API_KEY,
-    })
-    const modelId = process.env.CALMER_CHAT_MODEL || DEFAULT_MODEL
+    const model = chatModel()
 
     // ── Safety gate: fast keyword pre-filter + an LLM risk check on every
     // message (layered, conservative — takes the higher signal). HIGH risk
     // switches the reply into safety mode and logs a flag. [Pichowicz 2025]
     let risk: RiskLevel = 'none'
+    let riskCheckUnavailable = false
     if (userText) {
       const keywordFlag = detectSafetyTrigger(userText)
       let verdict: string | null = null
       try {
         const { text } = await generateText({
-          model: groq(modelId),
+          model,
           system: SAFETY_CLASSIFIER_SYSTEM,
           prompt: userText,
         })
         verdict = text
       } catch (e) {
-        console.warn('[chat] safety LLM check failed, using keyword filter only:', (e as Error).message)
+        console.error('[chat] SAFETY CHECK FAILED:', (e as Error).message)
       }
-      risk = combineRisk(keywordFlag.triggered, verdict)
+      ;({ risk, checkUnavailable: riskCheckUnavailable } = assessRisk(keywordFlag.triggered, verdict))
+      if (riskCheckUnavailable) {
+        // Keyword-only catches ~27% of crisis messages (scripts/safety-eval.mjs).
+        // Never pass that off as a clean check: this reply carries the crisis line.
+        console.error('[chat] risk check unavailable (verdict:', JSON.stringify(verdict), ') — fail-safe: crisis line added')
+      }
     }
     const safetyMode = risk === 'high'
 
@@ -100,7 +105,7 @@ export async function POST(req: Request) {
     let ventingContext = ''
     if (sessionId && userText) {
       // Pull the session + this session's venting/biometric history in one round.
-      const [{ data: sessionRow }, { data: ventRows }, { data: bioRows }] = await Promise.all([
+      const [{ data: sessionRow }, { data: ventRows }, { data: bioRows }, { data: sentRows }, { data: peakRows }] = await Promise.all([
         supabase.from('session').select('start_time, title, summary').eq('id', sessionId).maybeSingle(),
         // DESCENDING + limit, then reversed below. Ascending + limit returns the
         // OLDEST N, which froze the trend at the start of the session — the
@@ -112,13 +117,34 @@ export async function POST(req: Request) {
           .select('intensity_score, recorded_at')
           .eq('session_id', sessionId)
           .order('recorded_at', { ascending: false })
-          .limit(20),
+          // 40 = the game's own history length, so chat scores exactly the
+          // venting history (hits AND persisted idle ticks) the game ended on.
+          .limit(40),
         supabase
           .from('biometric_reading')
           .select('heart_rate, grip_pressure, recorded_at')
           .eq('session_id', sessionId)
           .order('recorded_at', { ascending: false })
           .limit(10),
+        // Prior text-sentiment scores for this session, so chat readiness fuses
+        // the sentiment TRAJECTORY over the reflection rather than only the latest
+        // message. Mirrors how /api/biometric already pulls sentiment history.
+        // Newest-first + limit for a recent window; reversed to chronological below.
+        supabase
+          .from('emotional_state')
+          .select('sentiment_score, recorded_at')
+          .eq('session_id', sessionId)
+          .not('sentiment_score', 'is', null)
+          .order('recorded_at', { ascending: false })
+          .limit(10),
+        // The session's peak intensity — the venting trend's reference point.
+        // The 40-row window above can miss an early burst entirely.
+        supabase
+          .from('venting_interaction')
+          .select('intensity_score')
+          .eq('session_id', sessionId)
+          .order('intensity_score', { ascending: false })
+          .limit(1),
       ])
 
       if (sessionRow?.summary) {
@@ -155,14 +181,22 @@ export async function POST(req: Request) {
           (r: { heart_rate: number | null; grip_pressure: number | null }) =>
             classifyBiometrics(r.heart_rate, r.grip_pressure).stressScore,
         )
+        .filter((s): s is number => s !== null) // no usable channel = no evidence
+      // Prior sentiments (chronological) + this message's sentiment last, so the
+      // fusion sees the reflection-phase trajectory, not a single point.
+      const priorSentiments = (sentRows ?? [])
+        .slice()
+        .reverse()
+        .map((r: { sentiment_score: number }) => Number(r.sentiment_score))
       const sessionDurationSeconds = sessionRow?.start_time
         ? (Date.now() - new Date(sessionRow.start_time).getTime()) / 1000
         : undefined
 
       const { readinessScore, stressLevel, signalsUsed, usingStubSignals } = computeReadinessScore({
         ventingIntensities,
+        ventingSessionPeak: peakRows?.[0] ? Number(peakRows[0].intensity_score) : undefined,
         biometricStressScores,
-        sentimentScores: [sentiment],
+        sentimentScores: [...priorSentiments, sentiment],
         sessionDurationSeconds,
         usingStubSentiment,
       })
@@ -171,8 +205,8 @@ export async function POST(req: Request) {
       // Only when this session actually has a venting stage behind it.
       if (ventingIntensities.length > 0) {
         ventingContext =
-          `Session context: this user has just come from a venting session in the rage room ` +
-          `(${ventingIntensities.length} logged actions). Their computed readiness is ` +
+          `Session context: this user has just come from a venting session in the rage room. ` +
+          `Their computed readiness is ` +
           `${readinessScore.toFixed(2)} on a 0-1 scale, where 0 means still highly activated and ` +
           `1 means calm. Open by gently acknowledging that they have just been venting and invite ` +
           `them to reflect on what brought it on. Never mention scores, numbers or sensors to the ` +
@@ -233,10 +267,12 @@ Guidelines:
 4. Ask open-ended, reflective questions; acknowledge feelings before offering suggestions.
 5. If the user expresses thoughts of self-harm or crisis, gently encourage contacting local emergency services or a crisis line (in India, Tele-MANAS 14416); never dismiss or minimize.
 6. You are first-level, short-term support — not a replacement for professional therapy. Encourage professional help for serious concerns.
-7. Keep responses conversational, empathetic, and supportive (2-4 paragraphs).`
+7. Keep responses conversational, empathetic, and supportive (2-4 paragraphs).${
+          riskCheckUnavailable ? `\n\n${RISK_CHECK_UNAVAILABLE_INSTRUCTION}` : ''
+        }`
 
     const result = streamText({
-      model: groq(modelId),
+      model,
       system: systemPrompt,
       messages: await convertToModelMessages(recentMessages),
       onFinish: async ({ text }) => {
@@ -251,7 +287,15 @@ Guidelines:
       },
     })
 
-    return result.toUIMessageStreamResponse()
+    // A failed reply must never be silent (when the model was retired, users
+    // got no reply and no error). The client shows its own deterministic
+    // fallback with the crisis line; this is the text it receives.
+    return result.toUIMessageStreamResponse({
+      onError: (err) => {
+        console.error('[chat] REPLY FAILED:', (err as Error)?.message ?? err)
+        return CHAT_UNAVAILABLE_REPLY
+      },
+    })
   } catch (error: any) {
     console.error('Error in chat API route:', error)
     return new Response(error?.message || 'Internal Server Error', { status: 500 })

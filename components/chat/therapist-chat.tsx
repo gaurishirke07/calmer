@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { ChatSidebar } from './chat-sidebar'
 import { CategorizedSessions, ChatMessage } from '@/lib/types'
+import { CHAT_UNAVAILABLE_REPLY } from '@/lib/calmer/safety'
 
 function getUIMessageText(
   msg: { parts?: Array<{ type: 'text' | string; text?: string }>; content?: string }
@@ -36,7 +37,7 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [input, setInput] = useState('')
 
-  const { messages, sendMessage, status, setMessages } = useChat({
+  const { messages, sendMessage, status, setMessages, error } = useChat({
     transport: new DefaultChatTransport({
       api: '/api/chat',
       // One unified `session` id drives history + fusion + summary.
@@ -306,6 +307,16 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
                       <span className="h-2 w-2 animate-pulse rounded-full bg-primary animation-delay-150" />
                       <span className="h-2 w-2 animate-pulse rounded-full bg-primary animation-delay-300" />
                     </div>
+                  </div>
+                </div>
+              )}
+              {/* Fail-safe: a failed reply is never silent, and always carries the
+                  crisis line. Deterministic text — it must work when the model,
+                  the provider, or our own server is down. */}
+              {error && !isStreaming && !isSubmitting && (
+                <div className="flex justify-start" role="alert">
+                  <div className="max-w-[85%] rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-secondary-foreground">
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{CHAT_UNAVAILABLE_REPLY}</p>
                   </div>
                 </div>
               )}

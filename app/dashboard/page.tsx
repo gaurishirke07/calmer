@@ -29,6 +29,8 @@ export default async function DashboardPage() {
     supabase
       .from('session')
       .select('id, created_at, venting_interaction(count)')
+      // idle ticks are persisted for the readiness history but are not actions
+      .neq('venting_interaction.input_type', 'idle')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(20),

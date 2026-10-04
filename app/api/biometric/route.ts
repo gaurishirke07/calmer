@@ -2,9 +2,9 @@ import { createServiceClient } from '@/lib/supabase/service'
 import {
   classifyBiometrics,
   computeReadinessScore,
-  computeRMSSD,
   corroborateBiometricTransition,
 } from '@/lib/calmer/readiness'
+import { cleanRmssd } from '@/lib/calmer/hrv-quality'
 
 export const runtime = 'nodejs'
 
@@ -68,7 +68,10 @@ export async function POST(req: Request) {
     .map((r) => r.ibi as number | null)
     .filter((v): v is number => typeof v === 'number')
   if (ibi !== null) ibiSequence.push(ibi)
-  const rmssd = computeRMSSD(ibiSequence.slice(-10)) // rolling 10-beat window
+  // Rolling 10-beat window, artifact-rejected (lib/calmer/hrv-quality.ts): on the
+  // bench data most raw beats were missed/doubled, so raw RMSSD (median 341 ms)
+  // measured the sensor, not the heart. null when too few clean beats survive.
+  const rmssd = cleanRmssd(ibiSequence.slice(-10)).rmssd
 
   const { stressScore, stressClass } = classifyBiometrics(heartRate, gripPressure)
 
@@ -124,10 +127,11 @@ export async function POST(req: Request) {
   // biometric trend = recent prior readings (chronological) + the one just
   // stored. Must use priorChrono, not `prior` — the query returns newest-first
   // and trendSignal reads the tail of the array as "most recent".
+  // Readings with no usable channel (null) carry no evidence and are skipped.
   const biometricStressScores = [
     ...priorChrono.map((r) => classifyBiometrics(r.heart_rate, r.grip_pressure).stressScore),
     stressScore,
-  ]
+  ].filter((s): s is number => s !== null)
 
   const sessionDurationSeconds = (Date.now() - new Date(session.start_time).getTime()) / 1000
 
@@ -135,13 +139,14 @@ export async function POST(req: Request) {
   // twice: once so the readiness score genuinely fuses across the whole
   // session rather than seeing biometrics alone, and again for the
   // false-positive guard below [Neupane et al. 2025].
-  const [{ data: ventRows }, { data: sentimentRows }] = await Promise.all([
+  const [{ data: ventRows }, { data: sentimentRows }, { data: peakRows }] = await Promise.all([
     supabase
       .from('venting_interaction')
       .select('intensity_score')
       .eq('session_id', session.id)
       .order('recorded_at', { ascending: false })
-      .limit(20),
+      // Same 40-sample window the game scores (hits + persisted idle ticks).
+      .limit(40),
     supabase
       .from('emotional_state')
       .select('sentiment_score')
@@ -149,7 +154,15 @@ export async function POST(req: Request) {
       .not('sentiment_score', 'is', null)
       .order('recorded_at', { ascending: false })
       .limit(10),
+    // The session's peak venting intensity (the trend's reference point).
+    supabase
+      .from('venting_interaction')
+      .select('intensity_score')
+      .eq('session_id', session.id)
+      .order('intensity_score', { ascending: false })
+      .limit(1),
   ])
+  const ventingSessionPeak = peakRows?.[0] ? Number(peakRows[0].intensity_score) : undefined
 
   // .reverse() restores chronological order for the trend calculations.
   const ventingIntensities = (ventRows ?? []).slice().reverse().map(
@@ -163,6 +176,7 @@ export async function POST(req: Request) {
   const { readinessScore, stressLevel, signalsUsed } = computeReadinessScore({
     biometricStressScores,
     ventingIntensities,
+    ventingSessionPeak,
     sentimentScores,
     sessionDurationSeconds,
   })
@@ -170,6 +184,7 @@ export async function POST(req: Request) {
   const { corroborated, reason } = corroborateBiometricTransition({
     biometricStressScores,
     ventingIntensities,
+    ventingSessionPeak,
     sentimentScores,
   })
 

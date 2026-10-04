@@ -85,7 +85,9 @@ export interface CategorizedSessions {
 export type StressLevel = 'low' | 'moderate' | 'high'
 export type SessionStatus = 'active' | 'completed' | 'abandoned'
 export type EmotionalStateSource = 'text' | 'biometric' | 'interaction' | 'fused'
-export type VentingInputType = 'tap' | 'drag' | 'text' | 'weapon_select'
+// 'idle' = a flush interval with no action (intensity 0). Persisted so every
+// route rebuilds the same venting history the game scored (migration 011).
+export type VentingInputType = 'tap' | 'drag' | 'text' | 'weapon_select' | 'idle'
 
 export interface Session {
   id: string

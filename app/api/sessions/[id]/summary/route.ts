@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { generateText } from 'ai'
-import { createOpenAI } from '@ai-sdk/openai'
 import { createClient } from '@/lib/supabase/server'
+import { chatModel } from '@/lib/calmer/chat-model'
 import { getSessionMessages, updateSessionSummary } from '@/lib/services/session'
 
 export const runtime = 'nodejs'
@@ -43,9 +43,8 @@ export async function POST(
     let summaryText = `A ${messages.length}-message conversation. Latest emotional read: ${mood}.`
     if (process.env.GROQ_API_KEY) {
       try {
-        const groq = createOpenAI({ baseURL: 'https://api.groq.com/openai/v1', apiKey: process.env.GROQ_API_KEY })
         const { text } = await generateText({
-          model: groq(process.env.CALMER_CHAT_MODEL || 'llama-3.3-70b-versatile'),
+          model: chatModel(),
           system:
             'Summarize this supportive conversation in 3-4 short sentences: what the user was feeling, what was discussed, and any coping ideas that came up. Be factual and grounded strictly in the conversation — never invent details.',
           prompt: conversation.slice(0, 6000),
