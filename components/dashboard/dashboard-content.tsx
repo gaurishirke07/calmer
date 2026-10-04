@@ -5,6 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { MoodAnalytics } from '@/components/analytics/mood-analytics'
+import { ReachOutButton } from '@/components/support/reach-out-button'
+import { SupportingLink } from '@/components/support/supporting-link'
 
 interface GameSession {
   id: string
@@ -62,8 +64,10 @@ export function DashboardContent({
         </div>
 
         <div className="flex flex-wrap gap-3">
+          <SupportingLink />
+          <ReachOutButton />
           {lastChatSessionId ? (
-            <Link href={`/chat`}>
+            <Link href={`/chat?session=${lastChatSessionId}`}>
               <Button className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-md shadow-primary/20">
                 Continue Last Chat
               </Button>

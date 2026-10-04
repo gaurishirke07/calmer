@@ -9,6 +9,18 @@ import { createClient } from '@/lib/supabase/client'
 import { ChatSidebar } from './chat-sidebar'
 import { CategorizedSessions, ChatMessage } from '@/lib/types'
 import { CHAT_UNAVAILABLE_REPLY } from '@/lib/calmer/safety'
+import { MAX_MESSAGE_CHARS } from '@/lib/calmer/chat-history'
+import { ReachOutButton } from '@/components/support/reach-out-button'
+
+// Stored therapist_convo rows -> the UI message shape useChat renders.
+function toUIMessages(messages: ChatMessage[]) {
+  return messages.map((m) => ({
+    id: m.id,
+    role: m.role,
+    content: m.content,
+    parts: [{ type: 'text' as const, text: m.content }],
+  }))
+}
 
 function getUIMessageText(
   msg: { parts?: Array<{ type: 'text' | string; text?: string }>; content?: string }
@@ -36,8 +48,13 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const [input, setInput] = useState('')
+  // The session the user most recently opened, so a slow load for an earlier
+  // click can't overwrite it; and a guard against Enter-Enter during the
+  // session-create request, which used to create two sessions.
+  const selectedSessionRef = useRef<string | null>(null)
+  const submittingRef = useRef(false)
 
-  const { messages, sendMessage, status, setMessages, error } = useChat({
+  const { messages, sendMessage, status, setMessages, error, stop, clearError } = useChat({
     transport: new DefaultChatTransport({
       api: '/api/chat',
       // One unified `session` id drives history + fusion + summary.
@@ -45,11 +62,34 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
     }),
   })
 
-  // Initialise from the rage-room handoff (?session=<uuid>) so chat continues
-  // the SAME unified session the venting happened in.
+  // Open a specific session (?session=<uuid>): the rage-room handoff (a fresh
+  // session — chat continues the SAME unified session the venting happened in)
+  // or "Continue Last Chat" from the dashboard, whose history must load. Before,
+  // the id was set but the messages never were, so "continue" looked empty.
   useEffect(() => {
-    if (calmerSessionId) setSessionId(calmerSessionId)
-  }, [calmerSessionId])
+    if (!calmerSessionId) return
+    selectedSessionRef.current = calmerSessionId
+    setSessionId(calmerSessionId)
+    let cancelled = false
+    // The user may click New Chat or another session before this answers.
+    const stillSelected = () => !cancelled && selectedSessionRef.current === calmerSessionId
+    fetch(`/api/sessions/${calmerSessionId}`)
+      .then((res) => {
+        // Deleted or not this user's: start fresh instead of sending into it.
+        if (res.status === 404 && stillSelected()) {
+          selectedSessionRef.current = null
+          setSessionId(null)
+        }
+        return res.ok ? res.json() : null
+      })
+      .then((data) => {
+        if (stillSelected() && data?.messages?.length) setMessages(toUIMessages(data.messages))
+      })
+      .catch((err) => console.error('Error loading session messages:', err))
+    return () => {
+      cancelled = true
+    }
+  }, [calmerSessionId, setMessages])
 
   const isStreaming = status === 'streaming'
   const isSubmitting = status === 'submitted'
@@ -84,6 +124,9 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
   // New chat = blank slate. The unified `session` row is created lazily on the
   // first message (see handleSubmit), so no empty sessions are left behind.
   const handleNewChat = () => {
+    stop() // an in-flight reply would otherwise land in the new chat
+    clearError() // a failed reply belongs to the chat it failed in
+    selectedSessionRef.current = null
     setSessionId(null)
     setMessages([])
   }
@@ -91,19 +134,15 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
   // Select existing session
   const handleSelectSession = async (selectedId: string) => {
     try {
+      stop()
+      clearError()
+      selectedSessionRef.current = selectedId
       setSessionId(selectedId)
       const res = await fetch(`/api/sessions/${selectedId}`)
+      if (selectedSessionRef.current !== selectedId) return
       if (res.ok) {
         const data = await res.json()
-        if (data.messages) {
-          const formatted = data.messages.map((m: ChatMessage) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            parts: [{ type: 'text', text: m.content }],
-          }))
-          setMessages(formatted)
-        }
+        if (data.messages) setMessages(toUIMessages(data.messages))
       }
     } catch (err) {
       console.error('Error loading session messages:', err)
@@ -151,8 +190,16 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
   // Auto create session on first prompt if missing
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || isStreaming || isSubmitting) return
+    if (!input.trim() || isStreaming || isSubmitting || submittingRef.current) return
+    submittingRef.current = true
+    try {
+      await submitMessage()
+    } finally {
+      submittingRef.current = false
+    }
+  }
 
+  const submitMessage = async () => {
     let currentSessionId = sessionId
     if (!currentSessionId) {
       const res = await fetch('/api/sessions', {
@@ -225,8 +272,10 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
             </span>
           </div>
 
-          {sessionId && (
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            {/* Renders only when the user has an active trusted person. */}
+            <ReachOutButton className="h-8 text-xs" />
+            {sessionId && (
               <Button
                 variant="outline"
                 size="sm"
@@ -236,8 +285,8 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
               >
                 {isSummarizing ? 'Summarizing...' : '✨ Summarize Session'}
               </Button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {summaryNotification && (
@@ -336,6 +385,8 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
               placeholder="Share what's on your mind..."
               className="flex-1 resize-none rounded-lg border border-border bg-background px-4 py-3 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               rows={1}
+              maxLength={MAX_MESSAGE_CHARS}
+              aria-label="Message"
               disabled={isStreaming || isSubmitting}
             />
             <Button

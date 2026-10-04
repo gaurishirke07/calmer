@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { UserMemory, MemoryCategory } from '@/lib/types'
+import { TrustedSupporterCard } from '@/components/support/trusted-supporter-card'
 
 export function SettingsContent() {
   const [memories, setMemories] = useState<UserMemory[]>([])
@@ -168,6 +169,8 @@ export function SettingsContent() {
       </Card>
 
       {/* Data Export & History */}
+      <TrustedSupporterCard />
+
       <Card className="border-border/50 bg-card/50">
         <CardHeader>
           <CardTitle>Data Export & Privacy</CardTitle>
