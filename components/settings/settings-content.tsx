@@ -77,9 +77,14 @@ export function SettingsContent() {
         const res = await fetch('/api/user/delete', { method: 'DELETE' })
         if (res.ok) {
           window.location.href = '/'
+          return
         }
+        // Never fail silently on the one action users must be able to trust.
+        const body = await res.json().catch(() => ({}))
+        setMessage(body.error || 'Could not delete your account. Please try again.')
       } catch (err) {
         console.error('Error deleting account:', err)
+        setMessage('Could not delete your account — check your connection and try again.')
       }
     }
   }

@@ -99,7 +99,7 @@ export function CTASection() {
                   All Systems Operational
                 </div>
                 <p className="text-xs text-muted-foreground/70">
-                  Private, encrypted, and accessible anytime.
+                  Your data stays yours — export or delete it anytime.
                 </p>
               </div>
             </div>

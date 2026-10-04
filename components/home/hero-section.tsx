@@ -37,8 +37,8 @@ export function HeroSection() {
 
         <p className="mx-auto mb-12 max-w-2xl text-pretty text-lg text-muted-foreground sm:text-xl leading-relaxed">
           A therapeutic platform that helps you express and release intense emotions 
-          through an interactive game, then guides you to tranquility with an AI-powered 
-          therapist chat.
+          through an interactive game, then helps you reflect on it with an AI 
+          companion.
         </p>
 
         <div className="flex flex-col items-center justify-center gap-6 sm:flex-row">
@@ -70,8 +70,8 @@ export function HeroSection() {
 
         <div className="mt-16 grid grid-cols-3 gap-8 rounded-2xl border border-white/10 bg-card/30 p-6 backdrop-blur-xl shadow-xl shadow-black/30">
           <div>
-            <p className="text-3xl font-bold text-primary">100%</p>
-            <p className="text-sm text-muted-foreground">Private & Secure</p>
+            <p className="text-3xl font-bold text-primary">Yours</p>
+            <p className="text-sm text-muted-foreground">Export or delete anytime</p>
           </div>
           <div>
             <p className="text-3xl font-bold text-primary">24/7</p>

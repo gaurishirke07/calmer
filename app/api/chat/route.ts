@@ -92,8 +92,10 @@ export async function POST(req: Request) {
     }
     const safetyMode = risk === 'high'
 
-    // Persistent-companion memory extraction (user_memories — kept feature).
-    if (userText) {
+    // Persistent-companion memory: only from messages the risk check actually
+    // ran on AND cleared. A flagged message — or one we could not check — is
+    // never turned into a memory that would be replayed into every future chat.
+    if (userText && risk === 'none' && !riskCheckUnavailable) {
       await autoExtractMemoriesFromMessage(supabase, user.id, userText)
     }
 
@@ -253,7 +255,7 @@ export async function POST(req: Request) {
     // On HIGH risk, replace normal therapy with the safety-mode reply.
     const systemPrompt = safetyMode
       ? SAFETY_MODE_SYSTEM
-      : `You are CALMER's AI Therapist & Persistent Companion, a compassionate and empathetic mental health guide.
+      : `You are CALMER's AI companion: a compassionate, empathetic guide for reflecting on difficult emotions, with persistent memory of what the user has shared. You are not a therapist and must never claim to be one.
 
 ${formattedMemories}
 

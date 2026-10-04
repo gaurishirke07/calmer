@@ -985,17 +985,20 @@ export function AngerReleaseGame(){
   },[])
 
   const flushVentingInteractions=useCallback(async()=>{
-    if(!sessionIdRef.current)return
+    // Logged-out play has no session: readiness, the panel and the handoff still
+    // run (before, this returned early and the panel waited forever), but
+    // nothing is persisted.
+    const sid=sessionIdRef.current
     const batch=pendingInteractionsRef.current
     pendingInteractionsRef.current=[]
-
-    const supabase=createClient()
-    const sid=sessionIdRef.current
+    const supabase=sid?createClient():null
 
     if(batch.length>0){
-      const rows=batch.map(b=>({session_id:sid,input_type:b.input_type,intensity_score:b.intensity_score,target_label:b.target_label}))
-      const{error}=await supabase.from('venting_interaction').insert(rows)
-      if(error)console.error('[game] failed to save venting_interaction:',error.message)
+      if(supabase){
+        const rows=batch.map(b=>({session_id:sid,input_type:b.input_type,intensity_score:b.intensity_score,target_label:b.target_label}))
+        const{error}=await supabase.from('venting_interaction').insert(rows)
+        if(error)console.error('[game] failed to save venting_interaction:',error.message)
+      }
     }else{
       // IDLE TICK. Going quiet IS a decline in venting intensity, and it is the
       // *largest* decline available. Before this, an empty batch returned early,
@@ -1010,8 +1013,10 @@ export function AngerReleaseGame(){
       // from venting_interaction — saw only the hits and read a user who had
       // calmed to 1.0 here as still sitting at their peak (0.24 on arrival in
       // chat). Needs migration 011, which allows input_type 'idle'.
-      const{error}=await supabase.from('venting_interaction').insert({session_id:sid,input_type:'idle',intensity_score:0,target_label:'idle'})
-      if(error)console.error('[game] failed to save idle venting_interaction (run migration 011?):',error.message)
+      if(supabase){
+        const{error}=await supabase.from('venting_interaction').insert({session_id:sid,input_type:'idle',intensity_score:0,target_label:'idle'})
+        if(error)console.error('[game] failed to save idle venting_interaction (run migration 011?):',error.message)
+      }
     }
 
     // Recompute readiness from the rolling intensity trend after each flush.
@@ -1039,6 +1044,7 @@ export function AngerReleaseGame(){
     readinessHistoryRef.current.push(readinessScore)
     if(readinessHistoryRef.current.length>10)readinessHistoryRef.current.shift()
     if(handoffConditionRef.current==='readiness')setShowHandoff(shouldOfferHandoff(readinessHistoryRef.current,CALM_THRESHOLD))
+    if(!supabase)return
     const{error:stateError}=await supabase.from('emotional_state').insert({
       session_id:sid,
       readiness_score:readinessScore,
@@ -1349,8 +1355,8 @@ export function AngerReleaseGame(){
               {readiness>=0.66
                 ?"You're reading calmer than when you started — a good moment to talk it through."
                 :readiness>=0.33
-                ?'Still processing some of it — the AI therapist can help you unpack what came up.'
-                :"That was a lot to let out. No rush — the AI therapist is there when you're ready."}
+                ?'Still processing some of it — the AI companion can help you unpack what came up.'
+                :"That was a lot to let out. No rush — the AI companion is there when you're ready."}
             </p>
             <div className="flex gap-3">
               <Button onClick={()=>startGame(theme)} className="bg-red-600 hover:bg-red-700 text-white font-bold">Again 💢</Button>
@@ -1363,7 +1369,7 @@ export function AngerReleaseGame(){
       </div>
 
       <div className="rounded-lg border border-white/8 bg-black/30 px-4 py-2">
-        <p className="text-xs text-white/38"><span className="text-white/55 font-semibold">Tip:</span> Grenade &amp; Molotov for mass destruction. Hold mouse for Chainsaw. Buddy explodes at 0 HP and respawns. After venting, talk to the AI therapist.</p>
+        <p className="text-xs text-white/38"><span className="text-white/55 font-semibold">Tip:</span> Grenade &amp; Molotov for mass destruction. Hold mouse for Chainsaw. Buddy explodes at 0 HP and respawns. After venting, talk it through with the AI companion.</p>
       </div>
     </div>
   )

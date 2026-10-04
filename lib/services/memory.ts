@@ -1,5 +1,6 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 import { UserMemory, MemoryCategory } from '@/lib/types'
+import { capMemoriesForPrompt, extractMemory, isDuplicateMemory } from '@/lib/calmer/memory-extract'
 
 export async function getUserMemories(supabase: SupabaseClient, userId: string): Promise<UserMemory[]> {
   const { data, error } = await supabase
@@ -51,7 +52,9 @@ export async function deleteUserMemory(supabase: SupabaseClient, userId: string,
 export function formatMemoriesForPrompt(memories: UserMemory[]): string {
   if (!memories || memories.length === 0) return 'No previous long-term memories recorded yet.'
 
-  const grouped = memories.reduce((acc, mem) => {
+  // Most recent few per category, bounded overall: the prompt must not grow
+  // with every remembered line (memories arrive newest-first).
+  const grouped = capMemoriesForPrompt(memories).reduce((acc, mem) => {
     acc[mem.category] = acc[mem.category] || []
     acc[mem.category].push(mem.memory_text)
     return acc
@@ -67,28 +70,19 @@ export function formatMemoriesForPrompt(memories: UserMemory[]): string {
 }
 
 /**
- * Auto-extract key long-term facts from a user message if present.
- * Looks for triggers, relaxation methods, work stress, exam stress, hobbies, goals.
+ * Remember an explicit first-person disclosure (a trigger, coping method, goal,
+ * hobby, or a stressor stated with its subject) — see lib/calmer/memory-extract.ts
+ * for what qualifies and why. The caller must only call this for messages the
+ * risk check cleared. Exact duplicates within a category are skipped.
  */
 export async function autoExtractMemoriesFromMessage(
   supabase: SupabaseClient,
   userId: string,
   text?: string
 ): Promise<void> {
-  if (!text || typeof text !== 'string') return
-  const lower = text.toLowerCase()
-
-  if (lower.includes('my goal') || lower.includes('i want to achieve') || lower.includes('trying to')) {
-    await saveUserMemory(supabase, userId, 'goal', text.trim().slice(0, 150))
-  } else if (lower.includes('work makes me') || lower.includes('boss') || lower.includes('deadline') || lower.includes('job stress')) {
-    await saveUserMemory(supabase, userId, 'stress_work', text.trim().slice(0, 150))
-  } else if (lower.includes('exam') || lower.includes('study') || lower.includes('college') || lower.includes('school')) {
-    await saveUserMemory(supabase, userId, 'stress_exam', text.trim().slice(0, 150))
-  } else if (lower.includes('family') || lower.includes('parents') || lower.includes('partner') || lower.includes('relationship')) {
-    await saveUserMemory(supabase, userId, 'stress_family', text.trim().slice(0, 150))
-  } else if (lower.includes('helps me calm') || lower.includes('i feel better when i') || lower.includes('walking') || lower.includes('music helps')) {
-    await saveUserMemory(supabase, userId, 'relaxation', text.trim().slice(0, 150))
-  } else if (lower.includes('i love') || lower.includes('my hobby') || lower.includes('in my free time')) {
-    await saveUserMemory(supabase, userId, 'hobby', text.trim().slice(0, 150))
-  }
+  const found = extractMemory(text)
+  if (!found) return
+  const existing = await getUserMemories(supabase, userId)
+  if (isDuplicateMemory(existing, found.category, found.text)) return
+  await saveUserMemory(supabase, userId, found.category, found.text)
 }

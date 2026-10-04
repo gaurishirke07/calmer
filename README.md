@@ -49,7 +49,7 @@ Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/
    ```
    `.env.local` is gitignored — never commit real keys, especially `SUPABASE_SERVICE_ROLE_KEY`. Do **not** leave placeholder duplicates in the file; dotenv keeps the last value.
 
-3. **Database** — run all eleven migrations **in numeric order** in the Supabase SQL editor:
+3. **Database** — run all twelve migrations **in numeric order** in the Supabase SQL editor:
    ```
    001_create_calmer_tables.sql          # original tables
    002_upgrade_calmer_schema.sql         # user_memories + mood logs
@@ -62,6 +62,7 @@ Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/
    009_session_mrt_condition.sql         # micro-randomised trial assignment
    010_emotional_state_corroborated.sql  # biometric corroboration outcome
    011_venting_idle_input_type.sql       # persist idle ticks (shared venting history)
+   012_drop_session_current_state_view.sql  # SECURITY: drop a view that bypassed RLS
    ```
    Then confirm RLS: as user A you must not be able to read user B's `session` rows.
 
@@ -128,6 +129,6 @@ components/     game/ (rage room), chat/, dashboard/, analytics/, ui/ (shadcn)
 lib/calmer/     readiness fusion + emotion classifier (the research core)
 lib/supabase/   client / server / service-role clients
 lib/services/   memory, analytics, emotion, session helpers
-scripts/        SQL migrations (run 001 → 011 in order)
+scripts/        SQL migrations (run 001 → 012 in order)
 hardware/       Arduino sketch + serial bridge
 ```
