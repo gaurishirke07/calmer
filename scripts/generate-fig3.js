@@ -123,7 +123,23 @@ function summarise(label, points) {
   const swIdx = argv.indexOf('--software-session')
   if (swIdx !== -1 && argv[swIdx + 1]) {
     const sid = argv[swIdx + 1]
-    out.softwareOnly = { session: sid, points: await trajectory(sid) }
+    // Keep ONLY the game's own snapshots (source 'interaction'), which fuse
+    // venting + elapsed time and nothing else. The 2026-08-04 regeneration used
+    // a session that also had 302 biometric-route snapshots attached, so 88% of
+    // the curve labelled "Software only" had biometrics fused in. Never again.
+    const all = await trajectory(sid)
+    const points = all.filter((p) => p.source === 'interaction')
+    if (points.length < all.length) {
+      console.log(`software only     : dropped ${all.length - points.length} non-game snapshots (biometric/chat) from ${sid}`)
+    }
+    const leaked = points.filter((p) => (p.signals_used || []).some((s) => s === 'biometricTrend' || s === 'sentiment'))
+    if (!points.length || leaked.length) {
+      throw new Error(
+        `--software-session ${sid} is not a software-only trajectory ` +
+          `(${points.length} game snapshots, ${leaked.length} fused biometrics/sentiment). Pick a plain rage-room session.`,
+      )
+    }
+    out.softwareOnly = { session: sid, points }
     summarise('software only', out.softwareOnly.points)
   } else {
     console.log('\nsoftware only     : SKIPPED — pass --software-session <UUID> of a real')

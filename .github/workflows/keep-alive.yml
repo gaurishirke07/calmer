@@ -1,0 +1,44 @@
+name: Supabase keep-alive
+
+# Free-tier Supabase projects pause after about a week without activity — which
+# took the whole app down on 2026-10-01 (sign-in failed with "Failed to fetch").
+# A tiny read twice a week keeps the project active before demos and reviews.
+#
+# Setup (once): repo Settings -> Secrets and variables -> Actions -> New
+# repository secret:
+#   NEXT_PUBLIC_SUPABASE_URL       e.g. https://<ref>.supabase.co
+#   NEXT_PUBLIC_SUPABASE_ANON_KEY  the anon (public) key — never the service-role key
+#
+# If the project is already paused this job FAILS, and GitHub emails the repo
+# owner: that failure is the alarm to resume it in the Supabase dashboard.
+# Note: GitHub disables scheduled workflows after 60 days with no repository
+# activity; re-enable it from the Actions tab if that happens.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1,4' # Mondays and Thursdays, 06:17 UTC
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query the database
+        env:
+          URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "::error::Add the NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY repository secrets (see this file's header)."
+            exit 1
+          fi
+          # A real PostgREST read (RLS returns an empty list to the anon role),
+          # so the database itself sees activity, not just the API gateway.
+          status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            "$URL/rest/v1/session?select=id&limit=1") || status="unreachable"
+          echo "Supabase responded: $status"
+          if [ "$status" != "200" ]; then
+            echo "::error::Supabase did not respond 200 ($status). If the project is paused, resume it in the Supabase dashboard."
+            exit 1
+          fi

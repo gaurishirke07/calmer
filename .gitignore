@@ -60,6 +60,12 @@ docs/lit-review-final.md
 # fig_architecture.pdf while the actual export was a .png, so it slipped
 # through. These patterns have no leading slash, so they match at any depth.
 fig3-data.json
+weight-sensitivity-data.json
+safety-eval-raw.json
+safety-eval-results.json
+biometric-quality-results.json
+mrt-analysis-results.json
+mrt-power.json
 fig_*.pdf
 fig_*.png
 fig_*.svg

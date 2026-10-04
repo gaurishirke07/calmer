@@ -17,6 +17,9 @@ The research contribution is a continuous, multi-signal **readiness score** that
 |---|---|
 | **Unified schema** (`scripts/003`) | `session` is the hub; `emotional_state` is the pivot (readiness snapshots); `venting_interaction` (Module 1), `therapist_convo` (Module 2), `biometric_reading` + `hardware_device` (hardware), `safety_flag` (crisis). |
 | **Readiness fusion** (`lib/calmer/readiness.ts`) | `computeReadinessScore` weight-fuses available signals and renormalizes; `classifyBiometrics` maps HR/pressure to a stress score; `corroborateBiometricTransition` evaluates whether a biometric-only decline is corroborated by a non-biometric signal and records the verdict per snapshot. |
+| **Face (opt-in)** (`components/calmer/face-tracker.tsx`) | Webcam expression via `@vladmandic/face-api`, on-device, off by default, models in `public/models/face`. Mapped to the same valence scale as text sentiment (`lib/calmer/affect-valence.ts`); a noisy signal, not ground-truth emotion. Never part of the evaluated four-signal rule. |
+| **Voice (opt-in)** (`components/calmer/voice-tracker.tsx`) | Microphone vocal effort (loudness above the noise floor; no speech recognition, nothing recorded), off by default. Scored by the same decline-from-session-peak rule as venting (`lib/calmer/vocal-arousal.ts`). Never part of the evaluated four-signal rule. |
+| **Gestures (opt-in)** (`components/calmer/gesture-controller.tsx`) | Smash the rage room with your hand: MediaPipe gesture recognition, palm aims, fist smashes, open hand stops (`lib/calmer/gesture-input.ts`). A new input device on the same path as the mouse, so venting telemetry is unchanged. Runtime + model load from CDNs (needs internet). |
 | **Sentiment** (`lib/calmer/emotion-classifier.ts`) | j-hartmann emotion classifier via the HF Inference router; loud lexicon-stub fallback (never silent). |
 | **Safety** (`lib/calmer/safety.ts`) | Layered crisis detection: lexical pre-filter + LLM risk check, combined conservatively; safety-mode reply and a persisted `safety_flag`. |
 | **Cross-module fusion** | One `session` spans venting **and** chat: the rage room's `session_id` is carried into `/chat?session=...`, so chat readiness fuses venting history with text sentiment. |
@@ -24,7 +27,7 @@ The research contribution is a continuous, multi-signal **readiness score** that
 
 ## Tech stack
 
-Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/ui · Supabase (Postgres + Auth + RLS) · Vercel AI SDK v6 · Llama-3.3-70B via **Groq** (OpenAI-compatible API) · j-hartmann classifier via the Hugging Face Inference router · Vitest · ESLint (eslint-config-next).
+Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/ui · Supabase (Postgres + Auth + RLS) · Vercel AI SDK v6 · open-weight gpt-oss-120b via **Groq** (OpenAI-compatible API; Groq retired its Llama chat models in 2026) · j-hartmann classifier via the Hugging Face Inference router · Vitest · ESLint (eslint-config-next).
 
 ## Prerequisites
 
@@ -46,7 +49,7 @@ Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/
    ```
    `.env.local` is gitignored — never commit real keys, especially `SUPABASE_SERVICE_ROLE_KEY`. Do **not** leave placeholder duplicates in the file; dotenv keeps the last value.
 
-3. **Database** — run all ten migrations **in numeric order** in the Supabase SQL editor:
+3. **Database** — run all eleven migrations **in numeric order** in the Supabase SQL editor:
    ```
    001_create_calmer_tables.sql          # original tables
    002_upgrade_calmer_schema.sql         # user_memories + mood logs
@@ -58,6 +61,7 @@ Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/
    008_biometric_hrv.sql                 # ibi + rolling rmssd
    009_session_mrt_condition.sql         # micro-randomised trial assignment
    010_emotional_state_corroborated.sql  # biometric corroboration outcome
+   011_venting_idle_input_type.sql       # persist idle ticks (shared venting history)
    ```
    Then confirm RLS: as user A you must not be able to read user B's `session` rows.
 
@@ -92,11 +96,25 @@ Walk the flow: sign up → rage room → **Find Peace** → chat → dashboard. 
 
 ## Testing
 
-26 unit tests cover the pure logic the research claim rests on — score bounds, weight renormalization over any subset of signals, honest reporting of which signals contributed, biometric classification bands, RMSSD, the layered safety combination, and the biometric corroboration rule. No DB or network required. Add tests alongside the code as `*.test.ts`.
+84 unit tests cover the pure logic the research claim rests on — score bounds, weight renormalization over any subset of signals, the session-peak venting trend, honest reporting of which signals contributed, biometric classification bands, RMSSD, the layered safety combination, the biometric corroboration rule, the sustained-calm handoff rule, and the per-signal contribution breakdown. No DB or network required. Add tests alongside the code as `*.test.ts`.
+
+## Research scripts
+
+Read-only analyses over the live database (Node 23.6+, `.env.local` with the
+service-role key; outputs are gitignored). Run with `node --no-warnings scripts/<name>.mjs`.
+
+| Script | What it answers |
+|---|---|
+| `weight-sensitivity.mjs` (+ `plot-weight-sensitivity.py`) | Do the readiness weights' *order* or *magnitudes* decide the handoff? Replays every stored decision. |
+| `safety-eval.mjs` | How well does the layered crisis detector do on a labelled set (`safety-eval-set.json`)? |
+| `biometric-quality.mjs` | What do the heart-rate plausibility gate and HRV artifact rejection change on the stored readings? |
+| `mrt-analysis.mjs` (`--power` for the sample-size simulation) | The micro-randomised trial analysis — readiness rule vs fixed timer. Protocol drafted separately. |
 
 ## CI
 
 `.github/workflows/ci.yml` runs typecheck → lint → test → build on every push/PR to `main`. The build step uses throwaway Supabase env values (no secrets in CI).
+
+`.github/workflows/keep-alive.yml` queries Supabase twice a week so the free-tier project never pauses (it did on 2026-10-01). Add the `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` repository secrets once; if the project is already paused the job fails and GitHub emails you.
 
 ## Deployment (Vercel)
 
@@ -110,6 +128,6 @@ components/     game/ (rage room), chat/, dashboard/, analytics/, ui/ (shadcn)
 lib/calmer/     readiness fusion + emotion classifier (the research core)
 lib/supabase/   client / server / service-role clients
 lib/services/   memory, analytics, emotion, session helpers
-scripts/        SQL migrations (run 001 → 010 in order)
+scripts/        SQL migrations (run 001 → 011 in order)
 hardware/       Arduino sketch + serial bridge
 ```
