@@ -9,8 +9,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "start": "next start"
+    "start": "next start",
+    "deploy": "vercel --prod"
   },
+
   "engines": {
     "node": ">=20"
   },

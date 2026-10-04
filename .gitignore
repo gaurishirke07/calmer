@@ -69,3 +69,4 @@ mrt-power.json
 fig_*.pdf
 fig_*.png
 fig_*.svg
+.vercel
