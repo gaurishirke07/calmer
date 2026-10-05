@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -16,7 +16,21 @@ export default function UpdatePasswordPage() {
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  // undefined = still checking; null = no session (link expired or reused)
+  const [email, setEmail] = useState<string | null | undefined>(undefined)
   const router = useRouter()
+
+  useEffect(() => {
+    createClient()
+      .auth.getUser()
+      .then(({ data }) => setEmail(data.user?.email ?? null))
+  }, [])
+
+  // A link can carry anyone's session, so always say WHOSE password this sets.
+  const signOut = async () => {
+    await createClient().auth.signOut()
+    router.push('/auth/login')
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -46,6 +60,19 @@ export default function UpdatePasswordPage() {
           <CardDescription>You&apos;ll use it with your email to sign in.</CardDescription>
         </CardHeader>
         <CardContent>
+          {email === null && (
+            <p role="alert" className="mb-4 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+              This link has expired or was already used. Request a new one below.
+            </p>
+          )}
+          {email && (
+            <p className="mb-4 rounded-lg border border-border/50 bg-secondary/30 p-3 text-sm">
+              Setting the password for <strong>{email}</strong>. Not you?{' '}
+              <button type="button" onClick={signOut} className="font-medium text-primary hover:underline">
+                Sign out
+              </button>
+            </p>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="password">New password</Label>
@@ -56,7 +83,7 @@ export default function UpdatePasswordPage() {
               <Input id="confirm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required className="bg-background" />
             </div>
             {error && <div role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button type="submit" className="w-full" disabled={loading || !email}>
               {loading ? 'Saving…' : 'Save password'}
             </Button>
           </form>

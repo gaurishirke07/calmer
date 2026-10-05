@@ -55,9 +55,9 @@ const ms = (s) => new Date(s).getTime()
 
 const [sessions, bio, vent, states] = await Promise.all([
   all('session?select=id,start_time'),
-  all('biometric_reading?select=session_id,device_id,heart_rate,grip_pressure,ibi,rmssd,recorded_at&order=recorded_at.asc'),
-  all('venting_interaction?select=session_id,input_type,intensity_score,recorded_at&order=recorded_at.asc'),
-  all('emotional_state?select=session_id,source,readiness_score,sentiment_score,recorded_at&order=recorded_at.asc'),
+  all('biometric_reading?select=session_id,device_id,heart_rate,grip_pressure,ibi,rmssd,recorded_at&order=recorded_at.asc,id.asc'),
+  all('venting_interaction?select=session_id,input_type,intensity_score,recorded_at&order=recorded_at.asc,id.asc'),
+  all('emotional_state?select=session_id,source,readiness_score,sentiment_score,recorded_at&order=recorded_at.asc,id.asc'),
 ])
 const group = (rows) => rows.reduce((m, r) => ((m[r.session_id] ??= []).push(r), m), {})
 const B = group(bio)

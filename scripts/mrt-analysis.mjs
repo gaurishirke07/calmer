@@ -37,6 +37,11 @@
  *
  * Usage:   node --no-warnings scripts/mrt-analysis.mjs            analyse stored sessions
  *          node --no-warnings scripts/mrt-analysis.mjs --power    simulation power table
+ *          node --no-warnings scripts/mrt-analysis.mjs --trial --from 2026-11-01 [--to 2026-11-21]
+ *                 the pre-registered analysis (MRT-PROTOCOL §7): only sessions the
+ *                 database randomised (013), inside the trial window, excluding the
+ *                 accounts in MRT_EXCLUDE_USERS (comma-separated user ids: the
+ *                 developers). Without --trial: a pipeline test on everything.
  * Needs:   Node 23.6+, .env.local with the service-role key (not for --power).
  * Writes:  mrt-analysis-results.json (gitignored). Read-only on the database.
  */
@@ -132,10 +137,10 @@ async function all(path) {
 }
 const [sessions, states, convo, events] = await Promise.all([
   // randomised_by exists only after migration 013
-  all('session?select=id,user_id,start_time,mrt_condition,randomised_by&order=start_time.asc')
-    .catch((e) => (String(e.message).includes('HTTP 400') ? all('session?select=id,user_id,start_time,mrt_condition&order=start_time.asc') : Promise.reject(e))),
-  all('emotional_state?select=session_id,source,readiness_score,recorded_at&source=eq.interaction&order=recorded_at.asc'),
-  all('therapist_convo?select=session_id,sender,created_at&sender=eq.user&order=created_at.asc'),
+  all('session?select=id,user_id,start_time,mrt_condition,randomised_by&order=start_time.asc,id.asc')
+    .catch((e) => (String(e.message).includes('HTTP 400') ? all('session?select=id,user_id,start_time,mrt_condition&order=start_time.asc,id.asc') : Promise.reject(e))),
+  all('emotional_state?select=session_id,source,readiness_score,recorded_at&source=eq.interaction&order=recorded_at.asc,id.asc'),
+  all('therapist_convo?select=session_id,sender,created_at&sender=eq.user&order=created_at.asc,id.asc'),
   // Absent until migration 013 is run; then every session's offers are logged.
   // a missing table (before 013) is a 404; any other failure must stop the run
   all('handoff_event?select=session_id,event,recorded_at&order=recorded_at.asc,id.asc')
@@ -148,10 +153,29 @@ const offerLog = events.reduce((m, e) => ((m[e.session_id] ??= []).push(e), m), 
 // every game session (randomised or not) for the re-vent outcome
 const gameStarts = sessions.filter((s) => flushes[s.id]?.length).map((s) => ({ user: s.user_id, id: s.id, t: ms(s.start_time) }))
 
+const argValue = (flag) => {
+  const i = process.argv.indexOf(flag)
+  return i !== -1 ? process.argv[i + 1] : undefined
+}
+const TRIAL = process.argv.includes('--trial')
+const FROM = argValue('--from') ? ms(argValue('--from')) : -Infinity
+const TO = argValue('--to') ? ms(argValue('--to')) + 24 * 3600 * 1000 : Infinity // inclusive end day
+const EXCLUDE = new Set((env.MRT_EXCLUDE_USERS ?? process.env.MRT_EXCLUDE_USERS ?? '').split(',').map((x) => x.trim()).filter(Boolean))
+if (TRIAL && FROM === -Infinity) throw new Error('--trial needs --from <first enrolment date> (the freeze date)')
+
 const points = []
 const excluded = []
 for (const s of sessions) {
   if (s.mrt_condition !== 'readiness' && s.mrt_condition !== 'timer') continue
+  if (TRIAL) {
+    // Logged and replayed offers are different measurements: never pool them.
+    if (s.randomised_by !== 'db') continue
+    if (ms(s.start_time) < FROM || ms(s.start_time) >= TO) continue
+    if (EXCLUDE.has(s.user_id)) {
+      excluded.push({ id: s.id, why: 'developer account' })
+      continue
+    }
+  }
   const f = flushes[s.id] ?? []
   if (!f.length) {
     excluded.push({ id: s.id, why: 'randomised but never played (no game snapshots)' })
@@ -196,8 +220,9 @@ const arm = (a) => points.filter((p) => p.a === a)
 const mean = (xs) => (xs.length ? xs.reduce((x, y) => x + y, 0) / xs.length : null)
 const results = {
   generatedAt: new Date().toISOString(),
-  warning:
-    'PIPELINE TEST ON DEVELOPER DATA — not evidence. The two participants are the authors; sessions predate the frozen rule.',
+  warning: TRIAL
+    ? `TRIAL ANALYSIS: DB-randomised sessions ${argValue('--from')} to ${argValue('--to') ?? 'now'}, ${EXCLUDE.size} excluded account(s).`
+    : 'PIPELINE TEST ON ALL DATA — not evidence (developer sessions, logged and replayed offers pooled). Use --trial for the pre-registered analysis.',
   participants: new Set(points.map((p) => p.person)).size,
   decisionPoints: points.length,
   byArm: Object.fromEntries(

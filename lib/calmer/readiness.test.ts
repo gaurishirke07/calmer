@@ -4,6 +4,7 @@ import {
   classifyBiometrics,
   computeRMSSD,
   corroborateBiometricTransition,
+  detectSafetyTrigger,
   shouldOfferHandoff,
   NOMINAL_WEIGHTS,
 } from './readiness'
@@ -373,3 +374,43 @@ describe('assessRisk (safety fail-safe)', () => {
     expect(CRISIS_LINE).toContain('14416')
   })
 })
+
+describe('safety keyword pre-filter', () => {
+  it('catches the variants the list used to miss', () => {
+    for (const t of ['I feel suicidal', 'thinking about self-harm again', 'I keep cutting myself', "everyone's better off dead"]) {
+      expect(detectSafetyTrigger(t).triggered).toBe(true)
+    }
+  })
+  it('still ignores ordinary venting', () => {
+    expect(detectSafetyTrigger('my boss is killing me with these deadlines').triggered).toBe(false)
+  })
+})
+
+describe('non-finite inputs (audit 2026-10-05)', () => {
+  it('treats NaN and Infinity as missing evidence instead of poisoning the score', () => {
+    const clean = computeReadinessScore({ ventingIntensities: [80, 40, 0], sessionDurationSeconds: 60 })
+    const dirty = computeReadinessScore({
+      ventingIntensities: [80, NaN, 40, Infinity, 0],
+      ventingSessionPeak: NaN,
+      sentimentScores: [NaN],
+      sessionDurationSeconds: 60,
+    })
+    expect(Number.isFinite(dirty.readinessScore)).toBe(true)
+    expect(dirty.readinessScore).toBeCloseTo(clean.readinessScore, 10)
+    expect(dirty.signalsUsed).not.toContain('sentiment')
+  })
+
+  it('drops a NaN duration rather than returning NaN', () => {
+    const r = computeReadinessScore({ ventingIntensities: [50, 0], sessionDurationSeconds: NaN })
+    expect(Number.isFinite(r.readinessScore)).toBe(true)
+    expect(r.signalsUsed).not.toContain('sessionContext')
+  })
+
+  it('does not read a NaN or out-of-range grip as maximum stress', () => {
+    expect(classifyBiometrics(75, NaN)).toEqual(classifyBiometrics(75, null))
+    expect(classifyBiometrics(75, -5)).toEqual(classifyBiometrics(75, null))
+    expect(classifyBiometrics(75, 5000)).toEqual(classifyBiometrics(75, null))
+    expect(classifyBiometrics(null, NaN)).toEqual({ stressScore: null, stressClass: null })
+  })
+})
+

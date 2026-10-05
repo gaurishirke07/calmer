@@ -4,13 +4,24 @@ import { useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 // Supabase only allows custom email templates with custom SMTP. With the
-// default templates, a dashboard invite (and an expired or reused link) comes
+// default templates, a DASHBOARD INVITE (and an expired or reused link) comes
 // back to the Site URL with the result in the URL fragment:
 //   #access_token=…&refresh_token=…&type=invite   or   #error=…&error_code=otp_expired
-// The SSR browser client runs the PKCE flow and rejects fragments ("Not a valid
-// PKCE flow url"), leaving them in place, so an invited participant would land
-// signed out with no way to set a password. This picks the session up instead.
-// Mounted once in the root layout; does nothing on ordinary page loads.
+// The SSR browser client runs the PKCE flow and rejects fragments, so an
+// invited participant would land signed out with no way to set a password.
+//
+// Accepting any session from a URL would let anyone sign a visitor into the
+// SENDER'S account with a crafted link (everything typed afterwards would land
+// there). So this only accepts invites: the type must be 'invite', the visitor
+// must not already be signed in, and the account must really have been invited
+// by an admin (invited_at), which no one can arrange for their own account.
+
+// A full page load on purpose: the server must render the next page with the
+// session cookie that was just set (or cleared), not a client-side transition.
+function hardNavigate(path: string) {
+  window.location.assign(path)
+}
+
 export function AuthHashHandler() {
   useEffect(() => {
     const hash = window.location.hash
@@ -21,22 +32,28 @@ export function AuthHashHandler() {
 
     const accessToken = params.get('access_token')
     const refreshToken = params.get('refresh_token')
-    if (params.get('error') || !accessToken || !refreshToken) {
-      window.location.assign('/auth/error')
+    if (params.get('error') || params.get('type') !== 'invite' || !accessToken || !refreshToken) {
+      hardNavigate('/auth/error')
       return
     }
-    const type = params.get('type')
-    createClient()
-      .auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
-      .then(({ error }) => {
-        if (error) {
-          console.error('[auth] could not use the session from the link:', error.message)
-          window.location.assign('/auth/error')
-          return
-        }
-        // Invited and recovering users have no usable password yet.
-        window.location.assign(type === 'invite' || type === 'recovery' ? '/auth/update-password' : '/dashboard')
-      })
+
+    const supabase = createClient()
+    void (async () => {
+      const { data: existing } = await supabase.auth.getUser()
+      if (existing.user) {
+        // Never replace a session someone already has.
+        hardNavigate('/auth/error')
+        return
+      }
+      const { data, error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+      if (error || !data.user?.invited_at) {
+        if (error) console.error('[auth] could not use the session from the link:', error.message)
+        await supabase.auth.signOut()
+        hardNavigate('/auth/error')
+        return
+      }
+      hardNavigate('/auth/update-password')
+    })()
   }, [])
 
   return null

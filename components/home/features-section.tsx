@@ -33,7 +33,7 @@ const features = [
   },
   {
     title: 'Your Data, Your Control',
-    description: 'Only you can see your sessions, data is encrypted in transit and at rest, and you can export or delete everything anytime. Chat messages are processed by AI providers to generate replies.',
+    description: 'Your sessions belong to your account. The study team can access research data, and you can choose a trusted person to see a summary (never your messages). Encrypted in transit and at rest; export or delete everything anytime. Chat messages are processed by AI providers to generate replies.',
     icon: (
       <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />

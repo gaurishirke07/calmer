@@ -98,7 +98,7 @@ When you press the FSR, its resistance drops and the voltage at **A5** rises —
 
 1. Install and open the **Arduino IDE**.
 2. Plug the Arduino into USB.
-3. In the IDE: **File → Open** → select `hardware/calmer_sensor.ino`.
+3. In the IDE: **File → Open** → select `hardware/calmer_sensor/calmer_sensor.ino`.
 4. **Tools → Board** → pick your board (e.g., "Arduino Uno" / "Arduino Nano").
 5. **Tools → Port** → pick the port that appeared when you plugged in (e.g., **COM5** on Windows, `/dev/tty.usbmodem…` on Mac). **Write this port down — you need it later.**
 6. Click **Upload** (the → arrow). Wait for "Done uploading."

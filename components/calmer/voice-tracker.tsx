@@ -73,7 +73,7 @@ export function VoiceTracker({
           for (let i = 0; i < frame.length; i++) sq += frame[i] * frame[i]
           const db = rmsToDb(Math.sqrt(sq / frame.length))
           floor = updateNoiseFloor(floor, db)
-          const v = vocalIntensity(db, floor)
+          const v = floor === null ? 0 : vocalIntensity(db, floor) // only silence so far
           setLevel(v)
           sum += v
           frames++

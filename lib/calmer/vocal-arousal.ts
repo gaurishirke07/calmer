@@ -16,6 +16,9 @@
 
 export const VOICE_MARGIN_DB = 10 // speech must clear the noise floor by this much
 export const VOICE_RANGE_DB = 40 // floor + margin .. + range maps onto 0..100
+// Quietest level treated as a real room. Real rooms through a laptop mic sit far
+// above this; anything below is digital silence from the browser.
+export const MIN_FLOOR_DB = -100
 
 export function rmsToDb(rms: number): number {
   return 20 * Math.log10(Math.max(rms, 1e-8))
@@ -26,7 +29,12 @@ export function rmsToDb(rms: number): number {
  * quieter frame, creeps up only slowly, so a long stretch of speech doesn't
  * drag the floor up to speech level (the pauses between phrases reset it).
  */
-export function updateNoiseFloor(floor: number | null, db: number): number {
+export function updateNoiseFloor(floor: number | null, db: number): number | null {
+  // Digital silence (mic start-up, a muted track) is not the room: leave the
+  // floor as it was (still unknown if nothing real has arrived). Letting a
+  // -160 dB frame set it made ordinary room noise read as loud speech for
+  // ~14 s and then as "settling" — a fabricated calm-down.
+  if (db < MIN_FLOOR_DB) return floor
   if (floor === null || db < floor) return db
   return floor + (db - floor) * 0.005
 }

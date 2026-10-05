@@ -17,6 +17,17 @@ describe('vocal-arousal helpers', () => {
     expect(after).toBeLessThan(-59.5)
   })
 
+  it('ignores digital-silence frames when tracking the floor', () => {
+    // start-up silence must not drag the floor to -160 dB
+    expect(updateNoiseFloor(null, rmsToDb(0))).toBeNull()
+    expect(updateNoiseFloor(-60, rmsToDb(0))).toBe(-60)
+    // ...so a quiet -60 dB room afterwards reads as no speech, not as shouting
+    let floor = updateNoiseFloor(null, rmsToDb(0))
+    floor = updateNoiseFloor(floor, -60)
+    expect(floor).toBe(-60)
+    expect(vocalIntensity(-60, floor!)).toBe(0)
+  })
+
   it('reads 0 for anything below the speech threshold', () => {
     expect(vocalIntensity(-55, -60)).toBe(0) // only 5 dB above the floor
     expect(vocalIntensity(-60 + VOICE_MARGIN_DB, -60)).toBe(0)

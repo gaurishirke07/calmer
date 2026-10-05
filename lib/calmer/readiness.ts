@@ -196,10 +196,26 @@ function buildContributions(
 
 // `weights` exists for the offline sensitivity study only; production callers
 // omit it and get the prior weights.
+// Non-finite numbers (NaN, ±Infinity) are no evidence at all. Before this, one
+// NaN anywhere made the whole score NaN: stress 'high', no offer, null stored.
+const finiteOnly = (xs: number[] | undefined) => xs?.filter(Number.isFinite)
+const finiteOrUndefined = (x: number | undefined) => (x !== undefined && Number.isFinite(x) ? x : undefined)
+
 export function computeReadinessScore(
-  inputs: ReadinessInputs,
+  rawInputs: ReadinessInputs,
   weights: Record<SignalKey, number> = WEIGHTS,
 ): ReadinessResult {
+  const inputs: ReadinessInputs = {
+    ...rawInputs,
+    ventingIntensities: finiteOnly(rawInputs.ventingIntensities),
+    ventingSessionPeak: finiteOrUndefined(rawInputs.ventingSessionPeak),
+    biometricStressScores: finiteOnly(rawInputs.biometricStressScores),
+    sentimentScores: finiteOnly(rawInputs.sentimentScores),
+    facialAffectScores: finiteOnly(rawInputs.facialAffectScores),
+    vocalIntensities: finiteOnly(rawInputs.vocalIntensities),
+    vocalSessionPeak: finiteOrUndefined(rawInputs.vocalSessionPeak),
+    sessionDurationSeconds: finiteOrUndefined(rawInputs.sessionDurationSeconds),
+  }
   const components: Component[] = [
     { key: 'ventingTrend', value: trendSignal(inputs.ventingIntensities ?? [], inputs.ventingSessionPeak) },
     { key: 'biometricTrend', value: trendSignal(inputs.biometricStressScores ?? []) },
@@ -384,7 +400,9 @@ export function classifyBiometrics(
 ): { stressScore: number | null; stressClass: StressLevel | null } {
   const parts: { weight: number; score: number }[] = []
 
-  if (gripPressure !== null && gripPressure !== undefined) {
+  // The FSR reads 0–1023 on the Uno's 10-bit ADC; anything else (or NaN, which
+  // used to fall through every band into the top one) is not a reading.
+  if (gripPressure !== null && gripPressure !== undefined && Number.isFinite(gripPressure) && gripPressure >= 0 && gripPressure <= 1023) {
     let pressureScore = 0
     if (gripPressure < 100) pressureScore = 0
     else if (gripPressure < 650) pressureScore = 0.25
@@ -461,12 +479,18 @@ export function stubTextSentiment(text: string): number {
  * pathway; measuring its rate is the safety evaluation (roadmap B2).
  * Hardening this list (obfuscation, more phrasings) is a real-deployment task.
  */
+// Matched against lower-cased text with hyphens/underscores read as spaces, so
+// "self-harm" hits "self harm". 'suicid' covers suicide/suicidal (the list
+// missed "I feel suicidal", audit 2026-10-05). This is the ONLY layer when the
+// LLM check is down, so it errs towards catching.
 const SAFETY_TRIGGER_PHRASES = [
-  'kill myself', 'want to die', 'end my life', 'suicide', 'hurt myself', 'self harm', 'no reason to live',
+  'kill myself', 'killing myself', 'want to die', 'wanna die', 'end my life', 'take my own life', 'suicid',
+  'hurt myself', 'hurting myself', 'self harm', 'selfharm', 'cut myself', 'cutting myself',
+  'no reason to live', 'better off dead', 'end it all',
 ]
 
 export function detectSafetyTrigger(text: string): { triggered: boolean; triggerType?: string; severity?: 'low' | 'medium' | 'high' } {
-  const lower = text.toLowerCase()
+  const lower = text.toLowerCase().replace(/[-_]/g, ' ')
   for (const phrase of SAFETY_TRIGGER_PHRASES) {
     if (lower.includes(phrase)) {
       return { triggered: true, triggerType: 'self_harm_language', severity: 'high' }

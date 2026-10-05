@@ -17,6 +17,7 @@ import {
   SAFETY_CLASSIFIER_SYSTEM,
   SAFETY_MODE_SYSTEM,
   assessRisk,
+  combineRisk,
   type RiskLevel,
 } from '@/lib/calmer/safety'
 
@@ -77,6 +78,9 @@ export async function POST(req: Request) {
     // switches the reply into safety mode and logs a flag. [Pichowicz 2025]
     let risk: RiskLevel = 'none'
     let riskCheckUnavailable = false
+    // Which layer raised it, stored on the flag so researchers can tell
+    // keyword-only flags (incl. LLM outages) from LLM-confirmed ones.
+    let riskSource = ''
     if (userText) {
       const keywordFlag = detectSafetyTrigger(userText)
       let verdict: string | null = null
@@ -91,8 +95,12 @@ export async function POST(req: Request) {
         console.error('[chat] SAFETY CHECK FAILED:', (e as Error).message)
       }
       ;({ risk, checkUnavailable: riskCheckUnavailable } = assessRisk(keywordFlag.triggered, verdict))
+      const llmRisk = riskCheckUnavailable ? 'none' : combineRisk(false, verdict)
+      riskSource =
+        [keywordFlag.triggered ? 'keyword' : '', llmRisk !== 'none' ? 'llm' : ''].filter(Boolean).join('+') +
+        (riskCheckUnavailable ? ' (llm unavailable)' : '')
       if (riskCheckUnavailable) {
-        // Keyword-only catches ~27% of crisis messages (scripts/safety-eval.mjs).
+        // Keyword-only catches ~30% of crisis messages (scripts/safety-eval.mjs).
         // Never pass that off as a clean check: this reply carries the crisis line.
         console.error('[chat] risk check unavailable (verdict:', JSON.stringify(verdict), ') — fail-safe: crisis line added')
       }
@@ -171,7 +179,7 @@ export async function POST(req: Request) {
       if (risk !== 'none') {
         const { error } = await supabase.from('safety_flag').insert({
           session_id: sessionId,
-          trigger_type: 'self_harm_risk',
+          trigger_type: riskSource || 'self_harm_risk',
           severity: risk === 'high' ? 'high' : 'low',
           source_text: userText.slice(0, 500),
         })
@@ -182,7 +190,9 @@ export async function POST(req: Request) {
       const classification = await classifyEmotion(userText)
       const sentiment = classification?.sentimentScore ?? stubTextSentiment(userText)
       const usingStubSentiment = classification === null
-      const emotionLabel = classification?.label ?? 'neutral'
+      // null when the classifier was unavailable (the stub gives a sentiment
+      // number, not an emotion), so dashboards don't count it as 'neutral'.
+      const emotionLabel = classification?.label ?? null
 
       // .reverse() restores chronological order — the queries above fetch
       // newest-first to get a RECENT window, but trendSignal expects oldest-first.
@@ -252,10 +262,8 @@ export async function POST(req: Request) {
       if (stateErr) console.error('[chat] failed to update emotional_state:', stateErr.message)
 
       // Keep the session fresh + titled + mood-tagged for the sidebar/dashboard.
-      const sessionUpdate: Record<string, unknown> = {
-        updated_at: new Date().toISOString(),
-        mood: emotionLabel,
-      }
+      const sessionUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() }
+      if (emotionLabel) sessionUpdate.mood = emotionLabel // keep the last real label
       if (!sessionRow?.title) sessionUpdate.title = userText.slice(0, 40)
       const { error: updErr } = await supabase.from('session').update(sessionUpdate).eq('id', sessionId)
       if (updErr) console.error('[chat] failed to update session:', updErr.message)

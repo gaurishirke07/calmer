@@ -53,6 +53,9 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
   // session-create request, which used to create two sessions.
   const selectedSessionRef = useRef<string | null>(null)
   const submittingRef = useRef(false)
+  // useChat keeps the options from its first render, so reach the current
+  // loader through a ref.
+  const loadSessionsRef = useRef<() => void>(() => {})
 
   const { messages, sendMessage, status, setMessages, error, stop, clearError } = useChat({
     transport: new DefaultChatTransport({
@@ -60,6 +63,10 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
       // One unified `session` id drives history + fusion + summary.
       body: { sessionId },
     }),
+    // The server saves the conversation while answering, so a NEW chat only
+    // qualifies for the sidebar once the reply is done. Refreshing on send
+    // (below) was too early: it showed up only after the next message.
+    onFinish: () => loadSessionsRef.current(),
   })
 
   // Open a specific session (?session=<uuid>): the rage-room handoff (a fresh
@@ -73,7 +80,7 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
     let cancelled = false
     // The user may click New Chat or another session before this answers.
     const stillSelected = () => !cancelled && selectedSessionRef.current === calmerSessionId
-    fetch(`/api/sessions/${calmerSessionId}`)
+    fetch(`/api/sessions/${encodeURIComponent(calmerSessionId)}`)
       .then((res) => {
         // Deleted or not this user's: start fresh instead of sending into it.
         if (res.status === 404 && stillSelected()) {
@@ -116,6 +123,9 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
       console.error('Error loading sessions:', err)
     }
   }, [])
+  useEffect(() => {
+    loadSessionsRef.current = loadSessions
+  }, [loadSessions])
 
   useEffect(() => {
     loadSessions()
@@ -138,8 +148,16 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
       clearError()
       selectedSessionRef.current = selectedId
       setSessionId(selectedId)
-      const res = await fetch(`/api/sessions/${selectedId}`)
+      const res = await fetch(`/api/sessions/${encodeURIComponent(selectedId)}`)
       if (selectedSessionRef.current !== selectedId) return
+      if (res.status === 404) {
+        // Deleted in another tab/device: start fresh rather than send into it.
+        selectedSessionRef.current = null
+        setSessionId(null)
+        setMessages([])
+        loadSessions()
+        return
+      }
       if (res.ok) {
         const data = await res.json()
         if (data.messages) setMessages(toUIMessages(data.messages))
@@ -161,8 +179,11 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
 
   // Delete session
   const handleDeleteSession = async (selectedId: string) => {
-    await fetch(`/api/sessions/${selectedId}`, { method: 'DELETE' })
+    if (sessionId === selectedId) stop() // a reply still streaming would refill the emptied chat
+    await fetch(`/api/sessions/${encodeURIComponent(selectedId)}`, { method: 'DELETE' })
     if (sessionId === selectedId) {
+      clearError()
+      selectedSessionRef.current = null
       setSessionId(null)
       setMessages([])
     }
@@ -296,7 +317,7 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
         )}
 
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4" aria-live="polite">
           {messages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center text-center">
               <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
@@ -391,6 +412,7 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
             />
             <Button
               type="submit"
+              aria-label="Send message"
               disabled={!input.trim() || isStreaming || isSubmitting}
               className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-md shadow-primary/20"
             >

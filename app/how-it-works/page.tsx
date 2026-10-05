@@ -49,7 +49,7 @@ export default function HowItWorksPage() {
             </h1>
             <p className="mx-auto max-w-2xl text-lg text-muted-foreground">
               A scientifically-informed approach to anger management that combines 
-              physical release with therapeutic conversation.
+              physical release with reflective conversation.
             </p>
           </div>
 
@@ -104,16 +104,12 @@ export default function HowItWorksPage() {
               Start your journey to better emotional wellness today.
             </p>
             <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Link href="/game">
-                <Button size="lg" className="w-full bg-accent text-accent-foreground hover:bg-accent/90 sm:w-auto">
-                  Try the Game
-                </Button>
-              </Link>
-              <Link href="/chat">
-                <Button size="lg" variant="outline" className="w-full sm:w-auto bg-transparent">
-                  Talk It Through
-                </Button>
-              </Link>
+              <Button asChild size="lg" className="w-full bg-accent text-accent-foreground hover:bg-accent/90 sm:w-auto">
+                <Link href="/game">Try the Game</Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className="w-full sm:w-auto bg-transparent">
+                <Link href="/chat">Talk It Through</Link>
+              </Button>
             </div>
           </div>
         </div>

@@ -70,3 +70,6 @@ fig_*.pdf
 fig_*.png
 fig_*.svg
 .vercel
+
+# Local Claude Code settings (dev-server config, permissions), machine-specific
+.claude/

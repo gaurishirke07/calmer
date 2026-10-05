@@ -2,7 +2,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { createClient } from '@/lib/supabase/client'
-import { classifyBiometrics, computeReadinessScore, shouldOfferHandoff, type SignalContribution, type StressLevel } from '@/lib/calmer/readiness'
+import { computeReadinessScore, shouldOfferHandoff, type SignalContribution, type StressLevel } from '@/lib/calmer/readiness'
 import { ReadinessDashboard } from '@/components/calmer/readiness-dashboard'
 import { FaceTracker } from '@/components/calmer/face-tracker'
 import { VoiceTracker } from '@/components/calmer/voice-tracker'
@@ -400,7 +400,7 @@ export function AngerReleaseGame(){
           emitShard(obj.x+obj.w/2,obj.y+obj.h/2,obj.color,16)
           emit(obj.x+obj.w/2,obj.y+obj.h/2,'spark',24,['#ffcc00','#ff6600','#fff'],9,4,38)
           if(w==='molotov')fires.current.push({x:obj.x+obj.w/2,y:FLOOR_Y,r:50+Math.random()*25,life:230,maxLife:230})
-          if(objsRef.current.filter(o=>!o.broken).length===0)setPhase('allClear')
+          if(objsRef.current.filter(o=>!o.broken).length===0){setPhase('allClear');phaseRef.current='allClear'}
         }
         hitAny=true
       }
@@ -1018,6 +1018,11 @@ export function AngerReleaseGame(){
     // Logged-out play has no session: readiness, the panel and the handoff still
     // run (before, this returned early and the panel waited forever), but
     // nothing is persisted.
+    // A hidden tab is not evidence of calming down, and an offer shown there is
+    // one nobody sees: with no new actions, skip the idle tick, the score and
+    // the offer until the page is visible again. (No actions arrive while
+    // hidden, so nothing is lost.)
+    if(document.hidden&&pendingInteractionsRef.current.length===0)return
     const sid=sessionIdRef.current
     const gen=sessionGenRef.current
     const batch=pendingInteractionsRef.current
@@ -1050,34 +1055,22 @@ export function AngerReleaseGame(){
       }
     }
 
-    // The sensor's latest readings for this session, scored the way the chat
-    // route scores them. Before this the game (whose score drives the trial's
-    // handoff) never read biometric_reading at all. No sensor = no rows = the
-    // signal is absent and the score is unchanged.
-    let biometricStressScores:number[]=[]
-    if(supabase){
-      const{data:bioRows,error:bioError}=await supabase.from('biometric_reading')
-        .select('heart_rate, grip_pressure')
-        .eq('session_id',sid)
-        .order('recorded_at',{ascending:false})
-        .limit(10)
-      if(bioError)console.error('[game] failed to read biometric_reading:',bioError.message)
-      if(gen!==sessionGenRef.current)return // "Again" started a new session meanwhile
-      biometricStressScores=(bioRows??[]).slice().reverse()
-        .map((r:{heart_rate:number|null;grip_pressure:number|null})=>classifyBiometrics(r.heart_rate,r.grip_pressure).stressScore)
-        .filter((v):v is number=>v!==null)
-    }
+    if(gen!==sessionGenRef.current)return // "Again" started a new session meanwhile
 
-    // Recompute readiness after each flush: venting trend, the sensor (if
-    // connected), elapsed time, and the opt-in face/voice signals. Sentiment
-    // joins in chat, where there is text to score.
+    // Recompute readiness after each flush: venting trend, elapsed time and the
+    // opt-in face/voice signals. Sentiment joins in chat, where there is text.
+    // The sensor is deliberately NOT fused here (tried 2026-10-04, reverted
+    // 2026-10-05): its signal is a decline from a peak, so a user whose heart
+    // rate stays calm and flat scores 0 on it and readiness tops out at 0.625,
+    // below the 0.66 offer threshold — the readiness arm would never offer to
+    // sensor users. /api/biometric and chat still fuse it. Whether and how it
+    // should drive the handoff is an open decision (paper/MRT-PROTOCOL.md §3).
     const{readinessScore,stressLevel,signalsUsed,contributions}=computeReadinessScore({
       // Pass the WHOLE history, not a slice — trendSignal measures decline from
       // the session peak and does its own windowing. Slicing here hid the peak
       // and made a settled user look "flat" again.
       ventingIntensities:intensityHistoryRef.current,
       ventingSessionPeak:sessionPeakRef.current,
-      biometricStressScores,
       // only readings from the last 4 s; empty when the camera is off
       facialAffectScores:faceReadingsRef.current.filter(r=>Date.now()-r.t<=4000).map(r=>r.v),
       // empty when the mic is off -> the voice signal is absent
@@ -1194,6 +1187,7 @@ export function AngerReleaseGame(){
   // offers it when the score crosses CALM_THRESHOLD, in flushVentingInteractions).
   useEffect(()=>{
     if(phase!=='playing'&&phase!=='allClear')return
+    if(document.hidden)return // shown on the first tick after the user is back
     if(handoffConditionRef.current==='timer'&&(MAX_VENT_SECONDS-timeLeft)>=TIMER_HANDOFF_SECONDS)setShowHandoff(true)
   },[phase,timeLeft])
 

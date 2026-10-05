@@ -3,7 +3,7 @@
 A two-module emotional-regulation web platform for students and young adults.
 
 - **Module 1 — Rage Room:** a symbolic, time-limited venting game (smash a room, beat a ragdoll "buddy") that logs venting intensity rather than encouraging open-ended rage.
-- **Module 2 — AI Therapist:** an LLM reflective chat that helps the user process what came up.
+- **Module 2 — AI Companion:** an LLM reflective chat that helps the user process what came up.
 
 The research contribution is a continuous, multi-signal **readiness score** that decides *when* to hand the user from venting to reflection — fusing venting-intensity trend, biometrics (heart rate + grip pressure), text sentiment, and session duration, and **renormalizing over whatever signals are present** so it degrades gracefully when hardware isn't attached.
 
@@ -72,9 +72,9 @@ Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/
    ```bash
    cp hardware/.env.example hardware/.env
    ```
-   `CALMER_HARDWARE_SECRET` there **must match** `HARDWARE_INGEST_SECRET` in `.env.local`, or the bridge and simulator get a 401. You can exercise the whole sensing path with no board attached:
+   `CALMER_HARDWARE_SECRET` there **must match** `HARDWARE_INGEST_SECRET` in `.env.local`, or the bridge and simulator get a 401. You can exercise the whole sensing path with no board attached. Run it from inside `hardware/`, which is where it reads `hardware/.env` from:
    ```bash
-   node hardware/simulate.js --session <SESSION_UUID>
+   cd hardware && npm install && node simulate.js --session <SESSION_UUID>
    ```
    See `hardware/TESTING.md` for the real-board procedure.
 
@@ -130,7 +130,7 @@ app/            App Router pages + API routes (chat, biometric, sessions, …)
 components/     game/ (rage room), chat/, dashboard/, analytics/, ui/ (shadcn)
 lib/calmer/     readiness fusion + emotion classifier (the research core)
 lib/supabase/   client / server / service-role clients
-lib/services/   memory, analytics, emotion, session helpers
+lib/services/   memory, analytics, session helpers
 scripts/        SQL migrations (run 001 → 014 in order) + research scripts
 hardware/       Arduino sketch + serial bridge
 ```

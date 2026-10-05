@@ -39,7 +39,10 @@ export async function getUserMoodAnalytics(
       .eq('user_id', userId)
       .order('updated_at', { ascending: false }),
     supabase.from('emotional_state').select('sentiment_score, stress_level, recorded_at').order('recorded_at', { ascending: false }),
-    supabase.from('therapist_convo').select('emotion_label'),
+    // The user's own messages that the classifier actually labelled. Assistant
+    // rows have no label and were counted as 'neutral', so Neutral was >= 50%
+    // by construction.
+    supabase.from('therapist_convo').select('emotion_label').eq('sender', 'user').not('emotion_label', 'is', null),
     supabase.from('user_memories').select('memory_text').eq('user_id', userId).eq('category', 'trigger'),
   ])
 

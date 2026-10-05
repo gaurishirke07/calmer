@@ -50,7 +50,9 @@ export function Navigation() {
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent shadow-lg shadow-primary/20 group-hover:shadow-primary/40 transition-all duration-300">
               <span className="text-xl font-black text-primary-foreground">C</span>
             </div>
-            <span className="text-2xl font-black tracking-tighter bg-gradient-to-r from-primary via-foreground to-accent bg-clip-text text-transparent group-hover:via-primary transition-all duration-300">
+            {/* Wordmark hidden on phones: with it, the signed-in buttons ran off a
+                375 px screen and Sign Out was unreachable. */}
+            <span className="hidden sm:inline text-2xl font-black tracking-tighter bg-gradient-to-r from-primary via-foreground to-accent bg-clip-text text-transparent group-hover:via-primary transition-all duration-300">
               CALMER
             </span>
           </Link>
@@ -74,37 +76,29 @@ export function Navigation() {
         </div>
 
         {/* Right Auth */}
-        <div className="flex items-center justify-end gap-3 z-10">
+        <div className="flex items-center justify-end gap-1 sm:gap-3 z-10">
           {loading ? (
             <div className="h-9 w-20 animate-pulse rounded-md bg-secondary" />
           ) : user ? (
             <>
-              <Link href="/dashboard">
-                <Button variant={pathname === '/dashboard' ? 'secondary' : 'ghost'} size="sm">
-                  Dashboard
-                </Button>
-              </Link>
-              <Link href="/settings">
-                <Button variant={pathname === '/settings' ? 'secondary' : 'ghost'} size="sm">
-                  Settings
-                </Button>
-              </Link>
+              <Button asChild variant={pathname === '/dashboard' ? 'secondary' : 'ghost'} size="sm">
+                <Link href="/dashboard">Dashboard</Link>
+              </Button>
+              <Button asChild variant={pathname === '/settings' ? 'secondary' : 'ghost'} size="sm">
+                <Link href="/settings">Settings</Link>
+              </Button>
               <Button variant="outline" size="sm" onClick={handleSignOut}>
                 Sign Out
               </Button>
             </>
           ) : (
             <>
-              <Link href="/auth/login">
-                <Button variant="ghost" size="sm">
-                  Sign In
-                </Button>
-              </Link>
-              <Link href="/auth/sign-up">
-                <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90">
-                  Get Started
-                </Button>
-              </Link>
+              <Button asChild variant="ghost" size="sm">
+                <Link href="/auth/login">Sign In</Link>
+              </Button>
+              <Button asChild size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90">
+                <Link href="/auth/sign-up">Get Started</Link>
+              </Button>
             </>
           )}
         </div>

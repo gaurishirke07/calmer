@@ -8,30 +8,51 @@ import { safeNextPath } from '@/lib/auth-redirect'
 // user on /dashboard?code=… without a session, invited participants had no way
 // to set a password, and nobody could reset one.
 //
-//   token_hash + type  — the Supabase email templates in docs/DEPLOYMENT.md §4
-//                        (works on any device)
-//   code               — the default PKCE redirect (same browser only)
+//   code               — the default PKCE redirect. Only the browser that asked
+//                        for the email can exchange it, so it is safe to sign in.
+//   token_hash + type  — the custom templates in docs/DEPLOYMENT.md §4. Anyone
+//                        can paste their OWN token_hash into a link, so these
+//                        never silently sign a visitor into someone's account:
+//     email/signup  → confirm the address, then sign out and ask them to log in
+//     invite        → only accounts an admin really invited
+//     recovery      → "Choose a password" shows which account it is for
+//     anything else → refused (the app sends no magic links or email changes)
+const ALLOWED: EmailOtpType[] = ['email', 'signup', 'invite', 'recovery']
+
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
   const tokenHash = searchParams.get('token_hash')
   const type = searchParams.get('type') as EmailOtpType | null
   const code = searchParams.get('code')
   const next = safeNextPath(searchParams.get('next'))
+  const fail = () => NextResponse.redirect(`${origin}/auth/error`)
 
   const supabase = await createClient()
-  let failed = true
-  if (tokenHash && type) {
-    const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash })
-    failed = !!error
-    if (error) console.error('[auth/confirm] verifyOtp failed:', error.message)
-  } else if (code) {
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
-    failed = !!error
-    if (error) console.error('[auth/confirm] code exchange failed:', error.message)
-  }
-  if (failed) return NextResponse.redirect(`${origin}/auth/error`)
 
-  // Invited users and password resets arrive without a usable password.
-  const destination = type === 'invite' || type === 'recovery' ? '/auth/update-password' : next
-  return NextResponse.redirect(`${origin}${destination}`)
+  if (code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code)
+    if (error) {
+      console.error('[auth/confirm] code exchange failed:', error.message)
+      return fail()
+    }
+    return NextResponse.redirect(`${origin}${next}`)
+  }
+
+  if (!tokenHash || !type || !ALLOWED.includes(type)) return fail()
+  const { data, error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash })
+  if (error) {
+    console.error('[auth/confirm] verifyOtp failed:', error.message)
+    return fail()
+  }
+
+  if (type === 'email' || type === 'signup') {
+    await supabase.auth.signOut()
+    return NextResponse.redirect(`${origin}/auth/confirmed`)
+  }
+  if (type === 'invite' && !data.user?.invited_at) {
+    await supabase.auth.signOut()
+    return fail()
+  }
+  // invite / recovery: no usable password yet
+  return NextResponse.redirect(`${origin}/auth/update-password`)
 }

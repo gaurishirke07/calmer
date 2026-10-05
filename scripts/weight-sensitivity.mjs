@@ -88,10 +88,10 @@ async function all(path) {
 }
 
 const [sessions, ventRows, bioRows, stateRows] = await Promise.all([
-  all('session?select=id,start_time,mrt_condition&order=start_time.asc'),
-  all('venting_interaction?select=session_id,input_type,intensity_score,recorded_at&order=recorded_at.asc'),
-  all('biometric_reading?select=session_id,device_id,heart_rate,grip_pressure,recorded_at&order=recorded_at.asc'),
-  all('emotional_state?select=session_id,source,readiness_score,sentiment_score,signals_used,recorded_at&order=recorded_at.asc'),
+  all('session?select=id,start_time,mrt_condition&order=start_time.asc,id.asc'),
+  all('venting_interaction?select=session_id,input_type,intensity_score,recorded_at&order=recorded_at.asc,id.asc'),
+  all('biometric_reading?select=session_id,device_id,heart_rate,grip_pressure,recorded_at&order=recorded_at.asc,id.asc'),
+  all('emotional_state?select=session_id,source,readiness_score,sentiment_score,signals_used,recorded_at&order=recorded_at.asc,id.asc'),
 ])
 const bySession = (rows) => rows.reduce((m, r) => ((m[r.session_id] ??= []).push(r), m), {})
 const V = bySession(ventRows)

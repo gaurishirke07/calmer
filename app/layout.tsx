@@ -10,7 +10,7 @@ const fontMono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono" });
 export const metadata: Metadata = {
   title: 'CALMER - Release Anger, Find Peace',
   description: 'A self-help platform: release anger through an interactive game, then reflect on it with an AI companion. Not a substitute for professional care.',
-  keywords: ['mental health', 'anger management', 'therapy', 'AI chatbot', 'stress relief'],
+  keywords: ['mental health', 'anger management', 'emotion regulation', 'AI companion', 'stress relief'],
 }
 
 export const viewport: Viewport = {

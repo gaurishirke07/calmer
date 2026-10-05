@@ -24,7 +24,10 @@ export default async function ChatPage({
   // Passing it in makes chat readiness FUSE this session's venting history
   // rather than seeing text sentiment alone (Novelty #1 cross-module fusion).
   const { session } = await searchParams
-  const calmerSessionId = session ?? null
+  // Only a well-formed UUID: anything else in a link (e.g. "../memories") would
+  // otherwise be spliced into API paths by the chat client.
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const calmerSessionId = session && UUID.test(session) ? session : null
 
   return (
     <main className="flex min-h-screen flex-col">

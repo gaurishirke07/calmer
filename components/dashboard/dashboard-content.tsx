@@ -42,11 +42,14 @@ export function DashboardContent({
   stats,
 }: DashboardContentProps) {
   const formatDate = (dateString: string) => {
+    // Fixed zone: this renders on the server (UTC on Vercel) and again in the
+    // browser; without it the two disagree and React throws a hydration error.
     return new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: 'Asia/Kolkata',
     })
   }
 
@@ -67,17 +70,13 @@ export function DashboardContent({
           <SupportingLink />
           <ReachOutButton />
           {lastChatSessionId ? (
-            <Link href={`/chat?session=${lastChatSessionId}`}>
-              <Button className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-md shadow-primary/20">
-                Continue Last Chat
-              </Button>
-            </Link>
-          ) : null}
-          <Link href="/chat">
-            <Button variant="outline" className="border-primary/50 hover:bg-primary/10">
-              Start New Chat
+            <Button asChild className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-md shadow-primary/20">
+              <Link href={`/chat?session=${lastChatSessionId}`}>Continue Last Chat</Link>
             </Button>
-          </Link>
+          ) : null}
+          <Button asChild variant="outline" className="border-primary/50 hover:bg-primary/10">
+            <Link href="/chat">Start New Chat</Link>
+          </Button>
         </div>
       </div>
 
@@ -154,11 +153,9 @@ export function DashboardContent({
             {gameSessions.length === 0 ? (
               <div className="py-8 text-center">
                 <p className="mb-4 text-muted-foreground">No game sessions yet</p>
-                <Link href="/game">
-                  <Button variant="outline" size="sm">
-                    Start Your First Session
-                  </Button>
-                </Link>
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/game">Start Your First Session</Link>
+                </Button>
               </div>
             ) : (
               <div className="space-y-3">
@@ -199,11 +196,9 @@ export function DashboardContent({
             {chatSessions.length === 0 ? (
               <div className="py-8 text-center">
                 <p className="mb-4 text-muted-foreground">No chat sessions yet</p>
-                <Link href="/chat">
-                  <Button variant="outline" size="sm">
-                    Start a Conversation
-                  </Button>
-                </Link>
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/chat">Start a Conversation</Link>
+                </Button>
               </div>
             ) : (
               <div className="space-y-3">
