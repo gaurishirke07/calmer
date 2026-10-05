@@ -35,7 +35,9 @@ function getUIMessageText(
 }
 
 export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: string | null }) {
-  const [sessionId, setSessionId] = useState<string | null>(null)
+  // The ?session= id is the initial state; app/chat/page.tsx keys this
+  // component on it, so a different link mounts a fresh chat.
+  const [sessionId, setSessionId] = useState<string | null>(calmerSessionId)
   const [categorizedSessions, setCategorizedSessions] = useState<CategorizedSessions>({
     today: [],
     yesterday: [],
@@ -56,7 +58,7 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
   // The session the user most recently opened, so a slow load for an earlier
   // click can't overwrite it; and a guard against Enter-Enter during the
   // session-create request, which used to create two sessions.
-  const selectedSessionRef = useRef<string | null>(null)
+  const selectedSessionRef = useRef<string | null>(calmerSessionId)
   const submittingRef = useRef(false)
   // useChat keeps the options from its first render, so reach the current
   // loader through a ref.
@@ -80,8 +82,6 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
   // the id was set but the messages never were, so "continue" looked empty.
   useEffect(() => {
     if (!calmerSessionId) return
-    selectedSessionRef.current = calmerSessionId
-    setSessionId(calmerSessionId)
     let cancelled = false
     // The user may click New Chat or another session before this answers.
     const stillSelected = () => !cancelled && selectedSessionRef.current === calmerSessionId
@@ -132,9 +132,19 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
     loadSessionsRef.current = loadSessions
   }, [loadSessions])
 
+  // Initial sidebar load (later refreshes go through loadSessions).
   useEffect(() => {
-    loadSessions()
-  }, [loadSessions])
+    let cancelled = false
+    fetch('/api/sessions')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.sessions) setCategorizedSessions(data.sessions)
+      })
+      .catch((err) => console.error('Error loading sessions:', err))
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // New chat = blank slate. The unified `session` row is created lazily on the
   // first message (see handleSubmit), so no empty sessions are left behind.

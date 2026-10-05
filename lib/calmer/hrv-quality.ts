@@ -52,3 +52,40 @@ export function cleanRmssd(ibis: number[]): { rmssd: number | null; accepted: nu
   if (diffs.length < 2) return { rmssd: null, accepted, total }
   return { rmssd: Math.sqrt(diffs.reduce((a, d) => a + d * d, 0) / diffs.length), accepted, total }
 }
+
+// ── Consecutive beats across readings ───────────────────────────────────────
+// Since 2026-10-06 the firmware reports EVERY beat and the bridge sends all
+// beats since its last post as `ibis` (stored per reading, migration 016).
+// Before, one beat per ~2 s reached the server, so "successive differences"
+// compared beats 2–3 apart and the stored RMSSD was not RMSSD.
+
+export const MAX_BEAT_GAP_MS = 5000 // a longer silence between readings = dropout
+export const RMSSD_WINDOW_BEATS = 30 // ~30 s of beats: the usual ultra-short window
+
+export interface BeatRow {
+  recorded_at: string
+  ibi: number | null
+  ibis?: number[] | null
+}
+
+/**
+ * The most recent run of successive beats, oldest first: the readings' beat
+ * lists joined in time order, cut at the last dropout (a gap longer than
+ * MAX_BEAT_GAP_MS) or at a reading without a beat list. Readings from the old
+ * bridge carry one beat per ~2 s, which are NOT successive beats, so they
+ * never contribute (their RMSSD is unknown, not wrong). `current` is this
+ * request's beat list (empty from an old bridge).
+ */
+export function contiguousBeats(rowsChrono: BeatRow[], current: number[], nowMs: number): number[] {
+  if (!current.length) return []
+  const segments: number[][] = []
+  let prevT = nowMs
+  for (let i = rowsChrono.length - 1; i >= 0; i--) {
+    const r = rowsChrono[i]
+    const t = Date.parse(r.recorded_at)
+    if (!Number.isFinite(t) || prevT - t > MAX_BEAT_GAP_MS || !r.ibis?.length) break
+    segments.unshift(r.ibis.filter(Number.isFinite))
+    prevT = t
+  }
+  return [...segments.flat(), ...current.filter(Number.isFinite)]
+}

@@ -5,7 +5,7 @@ import {
   computeReadinessScore,
   corroborateBiometricTransition,
 } from '@/lib/calmer/readiness'
-import { cleanRmssd } from '@/lib/calmer/hrv-quality'
+import { cleanRmssd, contiguousBeats, RMSSD_WINDOW_BEATS } from '@/lib/calmer/hrv-quality'
 
 export const runtime = 'nodejs'
 
@@ -47,6 +47,16 @@ export async function POST(req: Request) {
   if (heartRate === undefined || gripPressure === undefined || ibi === undefined) {
     return new Response('heart_rate, grip_pressure and ibi must be numbers or null', { status: 400 })
   }
+  // Every beat since the bridge's last post (new firmware/bridge). Older
+  // bridges send only `ibi`, the latest beat, which still works.
+  let ibis: number[] = []
+  if (body.ibis !== undefined && body.ibis !== null) {
+    if (!Array.isArray(body.ibis) || body.ibis.length > 30 || !body.ibis.every((v: unknown) => typeof v === 'number' && Number.isFinite(v))) {
+      return new Response('ibis must be an array of up to 30 numbers', { status: 400 })
+    }
+    ibis = (body.ibis as number[]).map(Math.round)
+  }
+
 
   const supabase = createServiceClient()
 
@@ -66,7 +76,7 @@ export async function POST(req: Request) {
   // and the rolling HRV (RMSSD over the IBI sequence including this beat).
   const { data: prior } = await supabase
     .from('biometric_reading')
-    .select('heart_rate, grip_pressure, ibi')
+    .select('*') // includes `ibis` once migration 016 exists (absent before: no error)
     .eq('session_id', session.id)
     // Newest-first, reversed below. Ascending + limit returned the OLDEST 20,
     // so the "rolling" RMSSD window was really the first ten beats of the
@@ -76,23 +86,22 @@ export async function POST(req: Request) {
 
   const priorChrono = (prior ?? []).slice().reverse()
 
-  const ibiSequence = priorChrono
-    .map((r) => r.ibi as number | null)
-    .filter((v): v is number => typeof v === 'number')
-  if (ibi !== null) ibiSequence.push(ibi)
-  // Rolling 10-beat window, artifact-rejected (lib/calmer/hrv-quality.ts): on the
-  // bench data most raw beats were missed/doubled, so raw RMSSD (median 341 ms)
-  // measured the sensor, not the heart. null when too few clean beats survive.
-  const rmssd = cleanRmssd(ibiSequence.slice(-10)).rmssd
+  // Successive beats only: the latest run of readings with no dropout between
+  // them, joined beat by beat (lib/calmer/hrv-quality.ts contiguousBeats), then
+  // artifact-rejected. On the bench data most raw beats were missed/doubled,
+  // so raw RMSSD (median 341 ms) measured the sensor, not the heart. null when
+  // too few clean beats survive.
+  const beats = contiguousBeats(priorChrono, ibis, Date.now())
+  const rmssd = cleanRmssd(beats.slice(-RMSSD_WINDOW_BEATS)).rmssd
 
   const { stressScore, stressClass } = classifyBiometrics(heartRate, gripPressure)
 
   // ── Provenance ────────────────────────────────────────────────────────────
   // Identify the sender so hardware rows are distinguishable from simulated
   // ones. A real board runs serial-bridge.js with --device-label; simulate.js
-  // never sets one, so its rows keep device_id = null. Without this the two are
-  // indistinguishable after the fact, and we make a claim in print about which
-  // parts of the sensing layer have actually been exercised on hardware.
+  // and the Fig. 3 generator send the label 'simulator' (scripts/provenance.mjs).
+  // Without this the two are indistinguishable after the fact, and we make a
+  // claim in print about which parts of the sensing layer ran on hardware.
   let deviceId: string | null = body.device_id ?? null
   if (!deviceId && body.device_label) {
     const { data: existing } = await supabase
@@ -118,19 +127,25 @@ export async function POST(req: Request) {
     }
   }
 
-  const { data: reading, error: readingErr } = await supabase
+  const row = {
+    session_id: session.id,
+    device_id: deviceId,
+    heart_rate: heartRate,
+    grip_pressure: gripPressure,
+    ibi: ibi ?? (ibis.length ? ibis[ibis.length - 1] : null),
+    rmssd,
+    stress_class: stressClass,
+  }
+  let { data: reading, error: readingErr } = await supabase
     .from('biometric_reading')
-    .insert({
-      session_id: session.id,
-      device_id: deviceId,
-      heart_rate: heartRate,
-      grip_pressure: gripPressure,
-      ibi,
-      rmssd,
-      stress_class: stressClass,
-    })
+    .insert(ibis.length ? { ...row, ibis } : row)
     .select()
     .single()
+  // Before migration 016 there is no `ibis` column: keep the reading anyway.
+  if (readingErr && ibis.length && /ibis/.test(readingErr.message)) {
+    console.warn('[biometric] no ibis column yet (run migration 016); saving without the beat list')
+    ;({ data: reading, error: readingErr } = await supabase.from('biometric_reading').insert(row).select().single())
+  }
 
   if (readingErr) {
     console.error('[biometric] insert failed', readingErr)

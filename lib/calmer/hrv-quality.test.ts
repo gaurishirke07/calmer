@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { cleanRmssd, plausibleHeartRate } from './hrv-quality'
+import { cleanRmssd, contiguousBeats, MAX_BEAT_GAP_MS, plausibleHeartRate } from './hrv-quality'
 import { computeRMSSD } from './readiness'
 
 describe('plausibleHeartRate', () => {
@@ -46,3 +46,40 @@ describe('cleanRmssd', () => {
     expect(cleanRmssd([]).rmssd).toBeNull()
   })
 })
+
+describe('contiguousBeats', () => {
+  const now = Date.parse('2026-10-06T10:00:10Z')
+  const at = (s: number) => new Date(now - s * 1000).toISOString()
+
+  it('joins every beat from consecutive readings, oldest first', () => {
+    const rows = [
+      { recorded_at: at(6), ibi: 810, ibis: [800, 810] },
+      { recorded_at: at(4), ibi: 830, ibis: [820, 830] },
+      { recorded_at: at(2), ibi: 850, ibis: [840, 850] },
+    ]
+    expect(contiguousBeats(rows, [860, 870], now)).toEqual([800, 810, 820, 830, 840, 850, 860, 870])
+  })
+
+  it('stops at a dropout so beats either side are never treated as successive', () => {
+    const gapSeconds = MAX_BEAT_GAP_MS / 1000 + 4
+    const rows = [
+      { recorded_at: at(2 + gapSeconds + 2), ibi: 700, ibis: [700] }, // before the dropout
+      { recorded_at: at(2), ibi: 900, ibis: [900] },
+    ]
+    expect(contiguousBeats(rows, [910], now)).toEqual([900, 910])
+  })
+
+  it("never treats the old bridge's one-beat-per-post readings as successive beats", () => {
+    const rows = [
+      { recorded_at: at(4), ibi: 800, ibis: [800, 805] },
+      { recorded_at: at(2), ibi: 820, ibis: null }, // old bridge: breaks the run
+    ]
+    expect(contiguousBeats(rows, [830], now)).toEqual([830])
+    expect(contiguousBeats(rows, [], now)).toEqual([]) // old-bridge request: unknown
+  })
+
+  it('is just the current beats when the last reading is stale', () => {
+    expect(contiguousBeats([{ recorded_at: at(60), ibi: 800 }], [790], now)).toEqual([790])
+  })
+})
+

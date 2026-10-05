@@ -49,3 +49,22 @@ export function sanitizeHistory(messages: unknown): ChatTurn[] | null {
   if (recent.length === 0 || recent[recent.length - 1].role !== 'user') return null
   return recent
 }
+
+/**
+ * The model's context, built from what the server SAVED for this session
+ * (therapist_convo rows, newest first, as queried) plus the new user message.
+ * Only that newest message comes from the request, so a crafted request can't
+ * plant earlier "assistant" or "user" turns (audit U9c).
+ */
+export function historyFromRows(
+  rowsNewestFirst: { sender: string; msg_text: string | null }[],
+  currentUserText: string,
+): ChatTurn[] {
+  const prior: ChatTurn[] = []
+  for (const r of rowsNewestFirst.slice(0, MAX_HISTORY_MESSAGES - 1).reverse()) {
+    if ((r.sender === 'user' || r.sender === 'assistant') && r.msg_text?.trim()) {
+      prior.push({ role: r.sender, content: r.msg_text.trim().slice(0, MAX_MESSAGE_CHARS) })
+    }
+  }
+  return [...prior, { role: 'user', content: currentUserText }]
+}

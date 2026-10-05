@@ -42,7 +42,7 @@ export default async function ChatPage({
               A safe, persistent space to process your emotions with personalized AI guidance
             </p>
           </div>
-          <TherapistChat calmerSessionId={calmerSessionId} />
+          <TherapistChat key={calmerSessionId ?? 'new'} calmerSessionId={calmerSessionId} />
         </div>
       </section>
     </main>

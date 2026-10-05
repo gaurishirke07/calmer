@@ -109,12 +109,10 @@ confirmation links would point at localhost.
 
 ## 5. Migrations
 
-Run in order in the SQL editor: `001` → `015`. Already run on the live
-project: up to `014` (2026-10-05). **Pending: `015_supporter_followups.sql`**.
-It only replaces/adds functions (supporters can step back; the 3-person
-invite cap can't be raced), so run it before or after deploying, in either
-order. Until it exists the "Stop being their trusted person" button says
-"not available yet".
+Run in order in the SQL editor: `001` → `016`. Already run on the live
+project: up to `015` (2026-10-06). **Pending: `016_biometric_beat_lists.sql`**
+(one column for the HRV fix). Safe in either order with the code: until it
+exists, sensor readings are saved without their beat list.
 
 Every migration is tested on a local Postgres 18 first: all of them applied
 in order to a fresh database with a Supabase-style auth shim, then the new

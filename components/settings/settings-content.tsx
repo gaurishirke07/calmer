@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { UserMemory, MemoryCategory } from '@/lib/types'
@@ -13,6 +14,7 @@ export function SettingsContent() {
   const [newMemoryText, setNewMemoryText] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [deletePassword, setDeletePassword] = useState('')
+  const router = useRouter()
 
   const loadMemories = async () => {
     setLoadingMemories(true)
@@ -29,8 +31,21 @@ export function SettingsContent() {
     }
   }
 
+  // Initial load (later refreshes go through loadMemories).
   useEffect(() => {
-    loadMemories()
+    let cancelled = false
+    fetch('/api/memories')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data) setMemories(data.memories || [])
+      })
+      .catch((err) => console.error('Failed to load memories:', err))
+      .finally(() => {
+        if (!cancelled) setLoadingMemories(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const handleAddMemory = async (e: React.FormEvent) => {
@@ -83,7 +98,9 @@ export function SettingsContent() {
         body: JSON.stringify({ password: deletePassword }),
       })
       if (res.ok) {
-        window.location.href = '/'
+        // the session is gone: re-render from the server, signed out
+        router.replace('/')
+        router.refresh()
         return
       }
       // Never fail silently on the one action users must be able to trust.

@@ -1,5 +1,5 @@
 // CALMER Serial Bridge
-// Reads plain-text lines from the Arduino (hardware/calmer_sensor.ino) over
+// Reads plain-text lines from the Arduino (hardware/calmer_sensor/calmer_sensor.ino) over
 // USB serial and forwards them to the Next.js ingest endpoint as JSON.
 //
 // This runs as a standalone Node process on whatever machine the Arduino is
@@ -67,7 +67,11 @@ const PRESSURE_MAP = {
 
 let latestGripPressure = null
 let latestHeartRate = null
-let latestIbi = null
+let latestIbi = null // old firmware: the LATEST beat only (IBI: lines)
+// New firmware (BEAT: lines): every beat since the last post, in order. Sent
+// as `ibis`, which the server joins into successive beats for RMSSD.
+let pendingBeats = []
+const MAX_BEATS_PER_POST = 30 // the route's limit
 let lastBpmTime = 0
 let sendTimer = null
 
@@ -106,6 +110,17 @@ parser.on('data', (line) => {
     return
   }
 
+  const beatMatch = line.match(/^BEAT:(\d+)/)
+  if (beatMatch) {
+    const ms = parseInt(beatMatch[1], 10)
+    if (ms >= 250 && ms <= 2000) {
+      pendingBeats.push(ms)
+      if (pendingBeats.length > MAX_BEATS_PER_POST) pendingBeats.shift()
+      scheduleSend()
+    }
+    return
+  }
+
   const ibiMatch = line.match(/^IBI:(\d+)/)
   if (ibiMatch) {
     const ibiVal = parseInt(ibiMatch[1], 10)
@@ -135,17 +150,24 @@ async function sendReading() {
     console.warn('[bridge] no pulse for >10s — marking HR/IBI unavailable')
     latestHeartRate = null
     latestIbi = null
+    pendingBeats = []
   }
 
   if (latestGripPressure === null && latestHeartRate === null) return
 
+  // Each beat is sent once. (The old bridge re-sent the last IBI on every post
+  // through a dropout, adding fake zero differences to RMSSD.)
+  const beats = pendingBeats
+  pendingBeats = []
   const payload = {
     session_id: SESSION_ID,
     heart_rate: latestHeartRate,
     grip_pressure: latestGripPressure,
-    ibi: latestIbi,
+    ibi: beats.length ? beats[beats.length - 1] : latestIbi,
+    ...(beats.length ? { ibis: beats } : {}),
     device_label: DEVICE_LABEL,
   }
+  latestIbi = null
 
   try {
     const res = await fetch(`${API_URL}/api/biometric`, {
@@ -158,10 +180,19 @@ async function sendReading() {
     })
     if (!res.ok) {
       console.error('[bridge] ingest failed:', res.status, await res.text())
+      requeue(beats)
     } else {
       console.log('[bridge] sent', payload)
     }
   } catch (err) {
     console.error('[bridge] network error:', err.message)
+    requeue(beats)
   }
+}
+
+// A failed post must not punch a hole in the beat sequence: put its beats back
+// in front of any that arrived meanwhile (keeping the newest if over the cap).
+function requeue(beats) {
+  if (!beats.length) return
+  pendingBeats = [...beats, ...pendingBeats].slice(-MAX_BEATS_PER_POST)
 }

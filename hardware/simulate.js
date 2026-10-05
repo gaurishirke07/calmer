@@ -58,11 +58,13 @@ function reading(i) {
   // IBI ~ 60000/hr, with beat-to-beat variability that GROWS as the user calms
   // (higher HRV / RMSSD when relaxed) — so the server-side RMSSD should rise.
   const baseIbi = Math.round(60000 / hr)
-  const jitter = Math.round((5 + t * 45) * (Math.random() * 2 - 1))
-  const ibi = baseIbi + jitter
+  // Every beat in this interval, like the current firmware + bridge send them.
+  const nBeats = Math.max(1, Math.round(INTERVAL / baseIbi))
+  const ibis = Array.from({ length: nBeats }, () => baseIbi + Math.round((5 + t * 45) * (Math.random() * 2 - 1)))
+  const ibi = ibis[ibis.length - 1]
   // device_label tags these rows as simulated (scripts/provenance.mjs), so a
   // simulator run can never be counted as real board data.
-  return { session_id: SESSION_ID, heart_rate: hr, grip_pressure: grip, ibi, device_label: 'simulator' }
+  return { session_id: SESSION_ID, heart_rate: hr, grip_pressure: grip, ibi, ibis, device_label: 'simulator' }
 }
 
 async function send(payload) {

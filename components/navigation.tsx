@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { createClient } from '@/lib/supabase/client'
@@ -10,6 +10,7 @@ import type { User } from '@supabase/supabase-js'
 
 export function Navigation() {
   const pathname = usePathname()
+  const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   // Phone menu: the page links are hidden below md, and there was no other
@@ -34,7 +35,10 @@ export function Navigation() {
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
-    window.location.href = '/'
+    setMenuOpen(false)
+    // re-render server pages without the session (they all re-check auth)
+    router.replace('/')
+    router.refresh()
   }
 
   const navLinks = [

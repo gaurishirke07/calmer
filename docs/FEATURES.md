@@ -155,8 +155,10 @@ demo panel (working system, wow) · **E** = ethics / supervisor.
   rates (outside 40–180 bpm) are rejected, channels renormalise if one drops, and
   every reading is tagged with its source (board vs simulator).
 - **Evidence:** bench-tested: ~1,530 real sensor readings.
-- **Don't overclaim:** the stress score uses heart-rate bands; true HRV needs a
-  firmware fix. The sensor isn't part of the in-game decision.
+- **Don't overclaim:** the stress score uses heart-rate bands; RMSSD is now
+  computed on successive beats (firmware fix 2026-10-06) but isn't used by the
+  score and still needs a bench test. The sensor isn't part of the in-game
+  decision.
 
 ## Tier 4 — the companion experience · P
 
@@ -227,5 +229,5 @@ demo panel (working system, wow) · **E** = ethics / supervisor.
 ## Never claim
 
 It's therapy · it measures emotion · the trial has shown an effect · the
-sensor drives the in-game decision · the stored "RMSSD" is true HRV · the safety
+sensor drives the in-game decision · HRV drives the stress score · the safety
 numbers are out-of-sample.

@@ -120,7 +120,7 @@ function replay(s) {
   const bio = (B[s.id] ?? []).map((b) => ({
     t: ms(b.recorded_at),
     v: classifyBiometrics(b.heart_rate, b.grip_pressure).stressScore,
-  })).filter((x) => x.v !== null) // no usable channel = no evidence
+  })) // nulls kept: the routes take the last N ROWS, then drop unusable ones
   const sent = states.filter((e) => e.sentiment_score != null).map((e) => ({ t: ms(e.recorded_at), v: Number(e.sentiment_score) }))
   const upTo = (xs, t, n) => {
     const a = xs.filter((x) => x.t <= t).map((x) => x.v)
@@ -139,7 +139,9 @@ function replay(s) {
     // Game rows fuse the sensor only since 2026-10-04 (and only when one is
     // connected); follow what each row recorded so older rows replay exactly.
     if (kind !== 'game' || (e.signals_used ?? []).includes('biometricTrend')) {
-      const b = upTo(bio, t, kind === 'biometric' ? 21 : 10)
+      // same order as the routes: newest N rows first, then drop readings with
+      // no usable channel (filtering first would reach further back in time)
+      const b = upTo(bio, t, kind === 'biometric' ? 21 : 10).filter((v) => v !== null)
       if (b.length) inputs.biometricStressScores = b
     }
     if (kind !== 'game') {

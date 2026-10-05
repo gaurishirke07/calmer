@@ -4,7 +4,7 @@
 
 By the end, squeezing a stress ball (with a heart-rate sensor on your finger) will push live readings into the CALMER web app, where they become part of a "readiness" score.
 
-> **Estimated time:** ~45–60 min the first time (wiring + flashing + first run). A real board was first bench-tested on 2026-08-03 (sessions `e3013af8`, `fac02e45`), so the path works — budget time for wiring and sensor-contact issues. Known limit: the firmware prints one beat interval per 1 s loop and the bridge forwards one every 2 s, so heart-rate variability (RMSSD) is computed on skipped beats; treat HRV values as unreliable until that is fixed.
+> **Estimated time:** ~45–60 min the first time (wiring + flashing + first run). A real board was first bench-tested on 2026-08-03 (sessions `e3013af8`, `fac02e45`), so the path works — budget time for wiring and sensor-contact issues. Since 2026-10-06 the firmware reports **every** beat (`BEAT:` lines) and the bridge sends them all, so RMSSD is computed on truly successive beats (it compiles for the Uno; **re-flash the board and bench-test it**, §9). Readings from the old firmware get no RMSSD rather than a wrong one.
 
 ---
 
@@ -109,14 +109,14 @@ You should now see lines like:
 Pressure:87  Level:No_Pressure
 Pressure:640  Level:Light_Pressure    ← appears when you squeeze
 BPM:78                                 ← appears when it detects your pulse
-IBI:769                                ← the gap between beats, in ms
+BEAT:769                               ← one line for EVERY beat: the gap since the last, in ms
 ```
 - `Pressure:` prints every second. Squeeze the ball → the number rises and the Level changes.
-- `BPM:` / `IBI:` only print when the sensor catches a heartbeat. Hold the pulse sensor gently against a fingertip and keep still; the onboard LED (pin 13) blinks on each beat.
+- `BPM:` / `BEAT:` only print when the sensor catches a heartbeat (`BEAT:` once per beat, so ~1 per second at rest). Hold the pulse sensor gently against a fingertip and keep still; the onboard LED (pin 13) blinks on each beat.
 
 > ⚠️ **The "28 problems" some editors (VS Code C/C++) show on the `.ino` are false alarms** — that tool reads Arduino code as plain C++ and doesn't understand Arduino macros. If the Arduino IDE says "Done uploading," the code is correct. Ignore the squiggles.
 
-✅ **Checkpoint:** Serial Monitor shows `Pressure:` lines always, and `BPM:`/`IBI:` when a pulse is detected. **Now close the Serial Monitor** — only one program can use the port at a time, and the bridge needs it next.
+✅ **Checkpoint:** Serial Monitor shows `Pressure:` lines always, and `BPM:`/`BEAT:` when a pulse is detected. **Now close the Serial Monitor** — only one program can use the port at a time, and the bridge needs it next.
 
 ---
 
@@ -227,13 +227,22 @@ To stop: press **Ctrl+C** in the bridge terminal.
 ```
 Pressure:<raw 0-1023>  Level:<No_Pressure|Light_Pressure|Medium_Pressure|High_Pressure>
 BPM:<int>
-IBI:<int milliseconds>
+BEAT:<int milliseconds>     one per detected beat (firmware from 2026-10-06)
+IBI:<int milliseconds>      old firmware only: the latest beat, printed once per loop
 ```
 
-**What the bridge sends** to `POST /api/biometric` (header `x-hardware-secret: <secret>`):
+**What the bridge sends** to `POST /api/biometric` (header `x-hardware-secret: <secret>`), about every 2 s:
 ```json
-{ "session_id": "<uuid>", "heart_rate": 78, "grip_pressure": 640, "ibi": 769 }
+{ "session_id": "<uuid>", "heart_rate": 78, "grip_pressure": 640, "ibi": 771, "ibis": [769, 771], "device_label": "arduino-uno-01" }
 ```
+`ibis` is every beat since the previous post, oldest first (stored per reading,
+migration 016); the server joins them across posts into runs of successive
+beats and computes RMSSD over the last 30 (`lib/calmer/hrv-quality.ts`).
+
+**Bench test for the beat fix:** at rest, `BEAT:` lines should arrive about
+once per beat and agree with `BPM:` (60000 / BEAT ≈ BPM). In Supabase,
+`biometric_reading.ibis` should hold 1–3 beats per row and `rmssd` should be
+roughly 20–100 ms for a still, seated adult with good contact.
 
 **Pin map:** pulse → **A0**, FSR → **A5**, beat LED → **13**, baud **9600**.
 

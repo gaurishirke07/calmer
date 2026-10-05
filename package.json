@@ -1,5 +1,5 @@
 {
-  "name": "my-v0-project",
+  "name": "calmer",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -13,12 +13,11 @@
     "deploy": "vercel --prod"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.86",
     "@ai-sdk/react": "3.0.51",
-    "@hookform/resolvers": "^3.10.0",
     "@mediapipe/tasks-vision": "^1.0.1",
     "@radix-ui/react-accordion": "1.2.2",
     "@radix-ui/react-alert-dialog": "1.1.4",
@@ -51,11 +50,9 @@
     "@supabase/supabase-js": "2.95.3",
     "@vladmandic/face-api": "^1.7.15",
     "ai": "^6.0.77",
-    "autoprefixer": "^10.4.20",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "1.0.4",
-    "date-fns": "4.1.0",
     "embla-carousel-react": "8.5.1",
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
@@ -69,7 +66,6 @@
     "recharts": "2.15.4",
     "sonner": "^1.7.4",
     "tailwind-merge": "^3.3.1",
-    "tailwindcss-animate": "^1.0.7",
     "vaul": "^1.1.2",
     "zod": "3.25.76"
   },

@@ -1,7 +1,7 @@
 import { streamText, generateText } from 'ai'
 import { createClient } from '@/lib/supabase/server'
 import { chatModel } from '@/lib/calmer/chat-model'
-import { sanitizeHistory } from '@/lib/calmer/chat-history'
+import { historyFromRows, MAX_HISTORY_MESSAGES, sanitizeHistory, type ChatTurn } from '@/lib/calmer/chat-history'
 import { createNewSession } from '@/lib/services/session'
 import { getUserMemories, formatMemoriesForPrompt, autoExtractMemoriesFromMessage } from '@/lib/services/memory'
 import { classifyEmotion } from '@/lib/calmer/emotion-classifier'
@@ -66,13 +66,13 @@ export async function POST(req: Request) {
       return new Response(CHAT_RATE_LIMITED_REPLY, { status: 429 })
     }
 
-    // Text-only user/assistant turns rebuilt server-side; the risk check below
-    // reads the same text the model does (see lib/calmer/chat-history.ts).
-    const history = sanitizeHistory(body?.messages)
-    if (!history) {
+    // Only the NEWEST user message is taken from the request (text only, capped;
+    // see lib/calmer/chat-history.ts). The risk check reads exactly this text.
+    const requestTurns = sanitizeHistory(body?.messages)
+    if (!requestTurns) {
       return new Response('A user message is required.', { status: 400 })
     }
-    const userText = history[history.length - 1].content
+    const userText = requestTurns[requestTurns.length - 1].content
 
     // A stale or foreign ?session= id used to pass straight through: every
     // insert, including the safety flag, then failed RLS while the UI looked fine.
@@ -86,6 +86,22 @@ export async function POST(req: Request) {
         .maybeSingle()
       if (!data) return new Response('Session not found.', { status: 404 })
       sessionRow = data
+    }
+
+    // Earlier turns come from what this server saved for the session, never
+    // from the request (a crafted request could otherwise plant "assistant"
+    // turns). Loaded before this message is saved below.
+    let modelHistory: ChatTurn[] = [{ role: 'user', content: userText }]
+    if (sessionId) {
+      const { data: prior, error: priorErr } = await supabase
+        .from('therapist_convo')
+        .select('sender, msg_text')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(MAX_HISTORY_MESSAGES - 1)
+      if (priorErr) console.error('[chat] failed to load history:', priorErr.message)
+      modelHistory = historyFromRows(prior ?? [], userText)
     }
 
     const model = chatModel()
@@ -319,7 +335,7 @@ Guidelines:
     const result = streamText({
       model,
       system: systemPrompt,
-      messages: history,
+      messages: modelHistory,
       onFinish: async ({ text }) => {
         if (!sessionId || !text) return // sessionId is the validated (or server-created) one
         const { error } = await supabase.from('therapist_convo').insert({

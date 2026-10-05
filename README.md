@@ -49,7 +49,7 @@ Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/
    ```
    `.env.local` is gitignored — never commit real keys, especially `SUPABASE_SERVICE_ROLE_KEY`. Do **not** leave placeholder duplicates in the file; dotenv keeps the last value.
 
-3. **Database** — run all fifteen migrations **in numeric order** in the Supabase SQL editor:
+3. **Database** — run all sixteen migrations **in numeric order** in the Supabase SQL editor:
    ```
    001_create_calmer_tables.sql          # original tables
    002_upgrade_calmer_schema.sql         # user_memories + mood logs
@@ -66,6 +66,7 @@ Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/
    013_study_integrity.sql               # DB-drawn trial arm, offer log, sensor rows via the API only
    014_trusted_supporter.sql             # trusted person: aggregates-only view, user-sent alerts
    015_supporter_followups.sql           # supporters can step back; invite cap made race-proof
+   016_biometric_beat_lists.sql          # every heartbeat stored, so RMSSD uses successive beats
    ```
    Then confirm RLS: as user A you must not be able to read user B's `session` rows.
 
@@ -142,6 +143,6 @@ components/     game/ (rage room), chat/, dashboard/, analytics/, ui/ (shadcn)
 lib/calmer/     readiness fusion + emotion classifier (the research core)
 lib/supabase/   client / server / service-role clients
 lib/services/   memory, analytics, session helpers
-scripts/        SQL migrations (run 001 → 015 in order) + research scripts
+scripts/        SQL migrations (run 001 → 016 in order) + research scripts
 hardware/       Arduino sketch + serial bridge
 ```

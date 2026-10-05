@@ -1078,7 +1078,9 @@ export function AngerReleaseGame(){
       // only readings from the last 4 s; empty when the camera is off
       facialAffectScores:faceReadingsRef.current.filter(r=>Date.now()-r.t<=4000).map(r=>r.v),
       // empty when the mic is off -> the voice signal is absent
-      vocalIntensities:voiceSamplesRef.current,
+      // only while the mic tracker is live (it unmounts off the play screen;
+      // stale samples would otherwise keep shaping the score)
+      vocalIntensities:phaseRef.current==='playing'?voiceSamplesRef.current:[],
       vocalSessionPeak:voicePeakRef.current,
       sessionDurationSeconds:(Date.now()-gameStartTimeRef.current)/1000,
     })

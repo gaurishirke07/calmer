@@ -20,8 +20,8 @@ Live site: https://calmer-phi.vercel.app
 | check | covers | status |
 |---|---|---|
 | `npx tsc --noEmit` | types across the whole app | ✅ |
-| `npx vitest run` — 127 tests, 11 files | readiness fusion + guards, handoff rule, NaN inputs, safety keywords + verdict parsing, chat-history sanitising, memory rules, supporter digest + links, dashboard maths (IST days, end-of-session stress), voice/face/gesture helpers, HRV maths, MRT statistics, safe redirects | ✅ |
-| `npx eslint .` | lint (0 errors; 6 known warnings) | ✅ |
+| `npx vitest run` — 135 tests, 11 files | readiness fusion + guards, handoff rule, NaN inputs, safety keywords + verdict parsing, chat-history sanitising, memory rules, supporter digest + links, dashboard maths (IST days, end-of-session stress), voice/face/gesture helpers, HRV maths, MRT statistics, safe redirects | ✅ |
+| `npx eslint .` | lint (0 errors, 0 warnings) | ✅ |
 | `npx next build` | production build | ✅ |
 | GitHub Actions CI | all of the above on GitHub | ✅ (green on every push so far) |
 
@@ -32,10 +32,12 @@ Live site: https://calmer-phi.vercel.app
 | 1.1 | All migrations apply in order | fresh Postgres 18 + Supabase auth shim, 001 → 015 | 🧑‍💻 | ✅ 2026-10-06 |
 | 1.2 | Anonymous visitors read nothing | anon key GET on every table → 0 rows / 401; every function → refused | 🧑‍💻 | ✅ live 2026-10-05 |
 | 1.3 | Trial integrity (013) | arm can't be set or edited; fake sensor / biometric rows refused; 400 draws ≈ 50/50 | 🧑‍💻 | ✅ local Postgres (208/192); live: functions present ✅ |
-| 1.4 | Run **015** on the live project | Supabase SQL editor, then anon call to `leave_support` → refused (exists) | 👤 | ⬜ |
+| 1.4 | Run **015** on the live project | Supabase SQL editor, then anon call to `leave_support` → refused (exists) | 👤 | ✅ 2026-10-06 |
+| 1.4b | Run **016** on the live project | `biometric_reading` has an `ibis` column | 👤 | ⬜ |
 | 1.5 | User A can't see user B's data | sign in as A, open `/chat?session=<B's id>` → treated as not found; dashboards show only own data | 👥 | ⬜ |
 | 1.6 | Supporter sees aggregates only | supporter's `/support` shows trends + dates, never text; supporter can't open the owner's sessions | 👥 | ✅ local Postgres · ⬜ live |
-| 1.7 | Security headers on the live site | `curl -I https://calmer-phi.vercel.app` shows X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy | 🧑‍💻 | ✅ local · ⬜ live after next deploy |
+| 1.7 | Security headers on the live site | `curl -I https://calmer-phi.vercel.app` shows X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy | 🧑‍💻 | ✅ live 2026-10-06 |
+| 1.7b | Content-Security-Policy (report-only) | Chrome DevTools console on every page **with camera/mic/gesture turned on**: no "Content Security Policy" lines (dev server shows harmless `unsafe-eval` ones) → then switch to enforcing (`next.config.mjs`) | 🎥 | ⚠️ production build clean on /game + /readiness (no camera) |
 | 1.8 | Signed-out users are sent to login | `/dashboard`, `/settings`, `/chat`, `/support` → 307 to `/auth/login`; `/support/accept` stays public | 🧑‍💻 | ✅ local |
 | 1.9 | Dependency audit | `npm audit --omit=dev` → no high/critical | 🧑‍💻 | ✅ (4 low in the AI SDK) |
 
@@ -126,7 +128,7 @@ Live site: https://calmer-phi.vercel.app
 |---|---|---|---|
 | 9.1 | Bench test (hardware/TESTING.md) | readings arrive; implausible heart rates rejected; rows tagged with the board's device | ⬜ |
 | 9.2 | Simulator run | rows tagged `simulator`; `biometric-quality.mjs` lists them as simulated | ⬜ (🧑‍💻 can run with a session id) |
-| 9.3 | After the HRV firmware fix | every beat reaches the server; RMSSD sane at rest | ⬜ (fix not built) |
+| 9.3 | HRV fix: re-flash the board (firmware 2026-10-06) | `BEAT:` lines once per beat; `ibis` 1–3 beats per row; `rmssd` ≈ 20–100 ms at rest (hardware/TESTING.md §9) | ⬜ (code compiles for the Uno; route + helper unit-tested; needs migration 016) |
 
 ## 10. Research pipeline
 

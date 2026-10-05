@@ -1,11 +1,27 @@
+// Every origin the app talks to: itself, Supabase (REST + realtime), and the
+// two hosts the opt-in gesture control loads from.
+const SUPABASE = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://*.supabase.co'
+const CSP = [
+  "default-src 'self'",
+  // Next.js inlines its bootstrap scripts; WebAssembly needs wasm-unsafe-eval.
+  "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  `connect-src 'self' ${SUPABASE} ${SUPABASE.replace('https://', 'wss://')} https://cdn.jsdelivr.net https://storage.googleapis.com`,
+  "worker-src 'self' blob:",
+  "media-src 'self' blob:",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join('; ')
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   images: {
     unoptimized: true,
   },
-  // Baseline security headers (audit S10). No Content-Security-Policy yet: the
-  // opt-in face/gesture models load scripts and WASM from cdn.jsdelivr.net and
-  // storage.googleapis.com, so a CSP needs testing with those features on.
+  // Baseline security headers (audit S10).
   async headers() {
     return [
       {
@@ -19,6 +35,13 @@ const nextConfig = {
           // Camera and mic only for CALMER itself (the opt-in face, voice and
           // gesture features), never for embedded third parties.
           { key: 'Permissions-Policy', value: 'camera=(self), microphone=(self), geolocation=()' },
+          // REPORT-ONLY for now: the browser logs what this policy WOULD block
+          // (DevTools console) but blocks nothing. The opt-in gesture feature
+          // loads WASM from cdn.jsdelivr.net and its model from
+          // storage.googleapis.com, and camera features can't be exercised in
+          // CI. Once the face/voice/gesture features run in Chrome with no
+          // violations logged, rename the key to Content-Security-Policy.
+          { key: 'Content-Security-Policy-Report-Only', value: CSP },
         ],
       },
     ]
