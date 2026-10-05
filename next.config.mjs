@@ -1,5 +1,6 @@
-// Every origin the app talks to: itself, Supabase (REST + realtime), and the
-// two hosts the opt-in gesture control loads from.
+// Every origin the app talks to: itself, Supabase (REST + realtime), the CDN
+// for the gesture WASM and transformers.js, Google storage (gesture model) and
+// Hugging Face (the ViT face model; its files redirect to *.hf.co).
 const SUPABASE = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://*.supabase.co'
 const CSP = [
   "default-src 'self'",
@@ -8,7 +9,7 @@ const CSP = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  `connect-src 'self' ${SUPABASE} ${SUPABASE.replace('https://', 'wss://')} https://cdn.jsdelivr.net https://storage.googleapis.com`,
+  `connect-src 'self' ${SUPABASE} ${SUPABASE.replace('https://', 'wss://')} https://cdn.jsdelivr.net https://storage.googleapis.com https://huggingface.co https://*.hf.co`,
   "worker-src 'self' blob:",
   "media-src 'self' blob:",
   "frame-ancestors 'none'",

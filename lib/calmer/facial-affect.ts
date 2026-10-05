@@ -13,15 +13,38 @@
 // evaluated four-signal rule.
 import { EMOTION_VALENCE } from './affect-valence'
 
-// face-api expression names -> the shared Ekman names
+// Expression names from either face model -> the shared Ekman names.
+// face-api: angry, disgusted, fearful, sad, neutral, surprised, happy.
+// Hugging Face ViT (Xenova/facial_emotions_image_detection): sad, disgust,
+// angry, neutral, fear, surprise, happy.
 const FACE_TO_EKMAN: Record<string, string> = {
   angry: 'anger',
   disgusted: 'disgust',
+  disgust: 'disgust',
   fearful: 'fear',
+  fear: 'fear',
   sad: 'sadness',
   neutral: 'neutral',
   surprised: 'surprise',
+  surprise: 'surprise',
   happy: 'joy',
+}
+
+/** Which model produced the face signal (stored with each snapshot). */
+export type FaceModel = 'face-api' | 'vit'
+
+// The research-grade option: Google's ViT-base (patch16, ImageNet-21k)
+// fine-tuned for facial expressions, run on-device with transformers.js.
+// q4 weights ≈ 57 MB, downloaded once and cached by the browser.
+export const VIT_FACE_MODEL = 'Xenova/facial_emotions_image_detection'
+
+/** transformers.js classifier output ([{label, score}]) -> {expression: probability}. */
+export function labelScoresToExpressions(out: { label: string; score: number }[]): Record<string, number> {
+  const expressions: Record<string, number> = {}
+  for (const { label, score } of out) {
+    if (typeof label === 'string' && Number.isFinite(score)) expressions[label.toLowerCase()] = score
+  }
+  return expressions
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { facialValence, topExpression } from './facial-affect'
+import { facialValence, labelScoresToExpressions, topExpression } from './facial-affect'
 import { EMOTION_VALENCE } from './affect-valence'
 import { computeReadinessScore } from './readiness'
 
@@ -24,6 +24,29 @@ describe('facialValence', () => {
   it('ignores unknown keys and returns null with no known mass', () => {
     expect(facialValence({ ...face({}), detectionScore: 0.9 })).toBeNull()
     expect(facialValence({})).toBeNull()
+  })
+})
+
+describe('Hugging Face ViT labels', () => {
+  it('map onto the same valence scale as face-api', () => {
+    const vit = labelScoresToExpressions([
+      { label: 'angry', score: 0.7 },
+      { label: 'neutral', score: 0.2 },
+      { label: 'disgust', score: 0.1 },
+    ])
+    const faceApi = { angry: 0.7, neutral: 0.2, disgusted: 0.1 }
+    expect(facialValence(vit)).toBeCloseTo(facialValence(faceApi)!, 10)
+    expect(facialValence(vit)!).toBeLessThan(0)
+  })
+
+  it('reads a happy face as positive and covers fear/surprise names', () => {
+    expect(facialValence(labelScoresToExpressions([{ label: 'happy', score: 0.9 }, { label: 'surprise', score: 0.1 }]))!).toBeGreaterThan(0)
+    expect(facialValence({ fear: 1 })).toBe(facialValence({ fearful: 1 }))
+    expect(facialValence({ surprise: 1 })).toBe(facialValence({ surprised: 1 }))
+  })
+
+  it('ignores junk entries', () => {
+    expect(labelScoresToExpressions([{ label: 'happy', score: NaN }, { label: 'sad', score: 0.5 }])).toEqual({ sad: 0.5 })
   })
 })
 

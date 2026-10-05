@@ -5,6 +5,8 @@ import {
   computeRMSSD,
   corroborateBiometricTransition,
   detectSafetyTrigger,
+  isMissingSignalColumns,
+  signalValuesOf,
   shouldOfferHandoff,
   NOMINAL_WEIGHTS,
 } from './readiness'
@@ -411,6 +413,26 @@ describe('non-finite inputs (audit 2026-10-05)', () => {
     expect(classifyBiometrics(75, -5)).toEqual(classifyBiometrics(75, null))
     expect(classifyBiometrics(75, 5000)).toEqual(classifyBiometrics(75, null))
     expect(classifyBiometrics(null, NaN)).toEqual({ stressScore: null, stressClass: null })
+  })
+})
+
+describe('signalValuesOf (stored with each snapshot)', () => {
+  it('keeps the value of every active signal, rounded, and nothing else', () => {
+    const r = computeReadinessScore({
+      ventingIntensities: [80, 40, 0],
+      facialAffectScores: [0.123456],
+      sessionDurationSeconds: 60,
+    })
+    const v = signalValuesOf(r.contributions)
+    expect(Object.keys(v).sort()).toEqual(['facialAffect', 'sessionContext', 'ventingTrend'])
+    expect(v.sessionContext).toBe(0.5)
+    expect(String(v.facialAffect).split('.')[1]?.length ?? 0).toBeLessThanOrEqual(4)
+  })
+
+  it('recognises the pre-017 missing-column error only', () => {
+    expect(isMissingSignalColumns({ message: "Could not find the 'signal_values' column of 'emotional_state'" })).toBe(true)
+    expect(isMissingSignalColumns({ message: 'new row violates row-level security policy' })).toBe(false)
+    expect(isMissingSignalColumns(null)).toBe(false)
   })
 })
 

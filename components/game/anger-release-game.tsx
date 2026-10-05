@@ -5,9 +5,13 @@ import { createClient } from '@/lib/supabase/client'
 import { computeReadinessScore, shouldOfferHandoff, type SignalContribution, type StressLevel } from '@/lib/calmer/readiness'
 import { ReadinessDashboard } from '@/components/calmer/readiness-dashboard'
 import { FaceTracker } from '@/components/calmer/face-tracker'
+import { FaceModelPicker } from '@/components/calmer/face-model-picker'
+import type { FaceModel } from '@/lib/calmer/facial-affect'
 import { VoiceTracker } from '@/components/calmer/voice-tracker'
 import { GestureController } from '@/components/calmer/gesture-controller'
 import { TRIAL_MODE } from '@/lib/calmer/trial-mode'
+import { insertSnapshot } from '@/lib/calmer/snapshot'
+import { CalmRating } from '@/components/calmer/calm-rating'
 import Link from 'next/link'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -291,6 +295,15 @@ export function AngerReleaseGame(){
   const toggleFace=useCallback(()=>{
     faceReadingsRef.current=[]
     setFaceOn(on=>!on)
+  },[])
+  // Which on-device model reads the face (fast face-api or the Hugging Face
+  // ViT). Switching starts a fresh buffer: the two aren't averaged together.
+  const[faceModel,setFaceModel]=useState<FaceModel>('face-api')
+  const faceModelRef=useRef<FaceModel>('face-api')
+  const chooseFaceModel=useCallback((m:FaceModel)=>{
+    faceReadingsRef.current=[]
+    faceModelRef.current=m
+    setFaceModel(m)
   },[])
   // recent readiness scores, one per flush — the handoff needs a SUSTAINED
   // crossing, not a single tick above the threshold (see shouldOfferHandoff)
@@ -1096,13 +1109,15 @@ export function AngerReleaseGame(){
     // so the final flush must not log one nobody saw.
     if(handoffConditionRef.current==='readiness'&&phaseRef.current!=='over')setShowHandoff(shouldOfferHandoff(readinessHistoryRef.current,CALM_THRESHOLD))
     if(!supabase)return
-    const{error:stateError}=await supabase.from('emotional_state').insert({
+    // Stores every signal's value too (and which model read the face), so the
+    // opt-in face/voice readings can be analysed later (migration 017).
+    const{error:stateError}=await insertSnapshot(supabase,{
       session_id:sid,
       readiness_score:readinessScore,
       stress_level:stressLevel,
       signals_used:signalsUsed,
       source:'interaction',
-    })
+    },contributions,faceModelRef.current)
     if(stateError)console.error('[game] failed to update emotional_state:',stateError.message)
   },[])
 
@@ -1320,7 +1335,8 @@ export function AngerReleaseGame(){
             {(faceOn||voiceOn||gestureOn)&&(
               <div className="flex w-full flex-col gap-2 sm:w-40 sm:shrink-0">
                 {gestureOn&&<GestureController onAim={onGestureAim} onPress={onGesturePress} onRelease={onGestureRelease}/>}
-                {faceOn&&<FaceTracker onReading={onFaceReading}/>}
+                {faceOn&&<FaceModelPicker value={faceModel} onChange={chooseFaceModel}/>}
+                {faceOn&&<FaceTracker key={faceModel} model={faceModel} onReading={onFaceReading}/>}
                 {voiceOn&&<VoiceTracker onSample={onVoiceSample}/>}
               </div>
             )}
@@ -1418,7 +1434,12 @@ export function AngerReleaseGame(){
           <div className="absolute inset-0 flex flex-col items-center justify-start overflow-y-auto bg-black/88 px-3 py-3 backdrop-blur-md sm:justify-center sm:py-0">
             <div className="mb-1 text-3xl sm:mb-3 sm:text-5xl">🧹</div>
             <h2 className="mb-1 text-2xl font-black text-white sm:text-3xl">SESSION DONE</h2>
-            <p className="mb-3 text-sm text-white/45 sm:mb-7">Feel that weight lift?</p>
+            <p className="mb-3 text-sm text-white/45 sm:mb-5">Feel that weight lift?</p>
+            {/* Self-report FIRST, before any score is shown, so the person's own
+                rating isn't anchored to the system's number (MRT-PROTOCOL §5). */}
+            <div className="mb-4 flex w-full justify-center sm:mb-6">
+              <CalmRating key={handoffSessionId??'none'} sessionId={handoffSessionId}/>
+            </div>
             {/* Closing feedback is about the regulation outcome and the
                 handoff — NOT about how much was destroyed. */}
             <div className={`grid ${TRIAL_MODE?'grid-cols-1':'grid-cols-2'} mb-4 gap-6 text-center sm:mb-8 sm:gap-10`}>
@@ -1446,9 +1467,9 @@ export function AngerReleaseGame(){
             </p>
             <div className="flex gap-3">
               <Button onClick={()=>startGame(theme)} className="bg-red-600 hover:bg-red-700 text-white font-bold">Again 💢</Button>
-              <Link href={handoffSessionId?`/chat?session=${handoffSessionId}`:'/chat'} onClick={()=>logHandoffEvent('end_screen_chat')}>
-                <Button className={`bg-blue-700 hover:bg-blue-800 text-white font-bold${!TRIAL_MODE&&readiness>=0.66?' animate-pulse':''}`}>Find Peace 🕊️</Button>
-              </Link>
+              <Button asChild className={`bg-blue-700 hover:bg-blue-800 text-white font-bold${!TRIAL_MODE&&readiness>=0.66?' animate-pulse':''}`}>
+                <Link href={handoffSessionId?`/chat?session=${handoffSessionId}`:'/chat'} onClick={()=>logHandoffEvent('end_screen_chat')}>Find Peace 🕊️</Link>
+              </Button>
             </div>
           </div>
         )}

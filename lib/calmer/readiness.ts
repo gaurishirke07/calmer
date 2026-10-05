@@ -498,3 +498,23 @@ export function detectSafetyTrigger(text: string): { triggered: boolean; trigger
   }
   return { triggered: false }
 }
+
+/**
+ * The value of every signal that went into a score, for storage with the
+ * snapshot (emotional_state.signal_values, migration 017). Only active signals,
+ * rounded to 4 decimals. Without this the face and voice readings were used
+ * live and then lost, and no signal could be re-analysed or used to learn the
+ * weights (paper/MRT-PROTOCOL.md §9).
+ */
+export function signalValuesOf(contributions: SignalContribution[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const c of contributions) {
+    if (c.active && c.value !== null && Number.isFinite(c.value)) out[c.key] = Math.round(c.value * 1e4) / 1e4
+  }
+  return out
+}
+
+/** True when an insert failed only because migration 017's columns are missing. */
+export function isMissingSignalColumns(error: { message?: string } | null): boolean {
+  return !!error?.message && /signal_values|face_model/.test(error.message)
+}

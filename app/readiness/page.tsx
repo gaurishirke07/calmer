@@ -12,6 +12,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { computeReadinessScore } from '@/lib/calmer/readiness'
 import { ReadinessDashboard } from '@/components/calmer/readiness-dashboard'
 import { FaceTracker } from '@/components/calmer/face-tracker'
+import { FaceModelPicker } from '@/components/calmer/face-model-picker'
+import type { FaceModel } from '@/lib/calmer/facial-affect'
 import { VoiceTracker } from '@/components/calmer/voice-tracker'
 
 const STEPS = 26
@@ -69,6 +71,11 @@ export default function ReadinessDemoPage() {
     setFaceVals([])
     setFaceOn(on)
   }
+  const [faceModel, setFaceModel] = useState<FaceModel>('face-api')
+  const chooseFaceModel = (m: FaceModel) => {
+    setFaceVals([])
+    setFaceModel(m)
+  }
   // Opt-in live mic signal: vocal-effort samples (last 40 = 20 s) + session peak.
   const [voiceOn, setVoiceOn] = useState(false)
   const [voice, setVoice] = useState<{ vals: number[]; peak: number }>({ vals: [], peak: 0 })
@@ -124,7 +131,8 @@ export default function ReadinessDemoPage() {
         />
         {(faceOn || voiceOn) && (
           <div className="flex w-full flex-col gap-2 sm:w-44 sm:shrink-0">
-            {faceOn && <FaceTracker onReading={onFace} />}
+            {faceOn && <FaceModelPicker value={faceModel} onChange={chooseFaceModel} />}
+            {faceOn && <FaceTracker key={faceModel} model={faceModel} onReading={onFace} />}
             {voiceOn && <VoiceTracker onSample={onVoice} />}
           </div>
         )}

@@ -9,6 +9,10 @@
  * randomised session; every session is eligible (availability = 1).
  *
  * PROXIMAL OUTCOMES (computable from data the app already stores):
+ *   Y0 selfCalm  — the 0-10 "how calm do you feel right now?" rating taken when
+ *                  the venting phase ends (self_report, migration 017; the
+ *                  recommended PRIMARY outcome). Sessions without a rating are
+ *                  left out of this outcome only.
  *   Y1 engaged   — user sent >= 1 chat message in the same session within
  *                  10 min of the venting phase ending (binary; higher is better)
  *   Y2 revent    — user started another rage-room session within 15 min
@@ -135,7 +139,7 @@ async function all(path) {
     if (page.length < 1000) return out
   }
 }
-const [sessions, states, convo, events] = await Promise.all([
+const [sessions, states, convo, events, selfReports] = await Promise.all([
   // randomised_by exists only after migration 013
   all('session?select=id,user_id,start_time,mrt_condition,randomised_by&order=start_time.asc,id.asc')
     .catch((e) => (String(e.message).includes('HTTP 400') ? all('session?select=id,user_id,start_time,mrt_condition&order=start_time.asc,id.asc') : Promise.reject(e))),
@@ -145,11 +149,17 @@ const [sessions, states, convo, events] = await Promise.all([
   // a missing table (before 013) is a 404; any other failure must stop the run
   all('handoff_event?select=session_id,event,recorded_at&order=recorded_at.asc,id.asc')
     .catch((e) => (String(e.message).includes('HTTP 404') ? [] : Promise.reject(e))),
+  // Absent until migration 017 (404 then).
+  all('self_report?select=session_id,calm,recorded_at&moment=eq.after_venting&order=recorded_at.asc,id.asc')
+    .catch((e) => (String(e.message).includes('HTTP 404') ? [] : Promise.reject(e))),
 ])
 const ms = (s) => new Date(s).getTime()
 const flushes = states.reduce((m, e) => ((m[e.session_id] ??= []).push(e), m), {})
 const userMsgs = convo.reduce((m, c) => ((m[c.session_id] ??= []).push(ms(c.created_at)), m), {})
 const offerLog = events.reduce((m, e) => ((m[e.session_id] ??= []).push(e), m), {})
+// the FIRST rating per session counts (a second tap is not a second outcome)
+const firstCalm = {}
+for (const r of selfReports) if (!(r.session_id in firstCalm)) firstCalm[r.session_id] = Number(r.calm)
 // every game session (randomised or not) for the re-vent outcome
 const gameStarts = sessions.filter((s) => flushes[s.id]?.length).map((s) => ({ user: s.user_id, id: s.id, t: ms(s.start_time) }))
 
@@ -212,10 +222,14 @@ for (const s of sessions) {
     engaged,
     revent,
     ventSecs: (ventEnd - start) / 1000,
+    selfCalm: firstCalm[s.id] ?? null,
   })
 }
 
-const outcome = (key) => wcls(points.map((p) => ({ person: p.person, a: p.a, y: p[key] })))
+// Points without a value for this outcome (e.g. no calm rating) are dropped
+// from THIS outcome only.
+const outcome = (key) =>
+  wcls(points.filter((p) => p[key] !== null && p[key] !== undefined).map((p) => ({ person: p.person, a: p.a, y: p[key] })))
 const arm = (a) => points.filter((p) => p.a === a)
 const mean = (xs) => (xs.length ? xs.reduce((x, y) => x + y, 0) / xs.length : null)
 const results = {
@@ -237,10 +251,12 @@ const results = {
         engagedRate: mean(ps.map((p) => p.engaged)),
         reventRate: mean(ps.map((p) => p.revent)),
         meanVentSecs: mean(ps.map((p) => p.ventSecs)),
+        rated: ps.filter((p) => p.selfCalm !== null).length,
+        meanSelfCalm: mean(ps.filter((p) => p.selfCalm !== null).map((p) => p.selfCalm)),
       }]
     }),
   ),
-  effects: { engaged: outcome('engaged'), revent: outcome('revent'), ventSecs: outcome('ventSecs') },
+  effects: { selfCalm: outcome('selfCalm'), engaged: outcome('engaged'), revent: outcome('revent'), ventSecs: outcome('ventSecs') },
   excluded,
 }
 writeFileSync(join(ROOT, 'mrt-analysis-results.json'), JSON.stringify(results, null, 2))
@@ -249,7 +265,7 @@ const f = (x, d = 2) => (x === null || x === undefined ? 'n/a' : Number(x).toFix
 console.log(`\nMRT ANALYSIS — ${results.decisionPoints} randomised sessions from ${results.participants} participant(s)`)
 console.log(`!! ${results.warning}\n`)
 for (const [name, b] of Object.entries(results.byArm)) {
-  console.log(`  ${name.padEnd(9)} sessions ${String(b.sessions).padStart(3)} (${b.loggedSessions} logged)  offered ${f(100 * b.offeredRate, 0)}% (median at ${f(b.medianOfferSecs, 0)} s, accepted ${b.acceptedRate === null ? 'n/a' : f(100 * b.acceptedRate, 0) + '%'})  engaged ${f(100 * b.engagedRate, 0)}%  re-vent ${f(100 * b.reventRate, 0)}%  mean venting ${f(b.meanVentSecs, 0)} s`)
+  console.log(`  ${name.padEnd(9)} sessions ${String(b.sessions).padStart(3)} (${b.loggedSessions} logged)  offered ${f(100 * b.offeredRate, 0)}% (median at ${f(b.medianOfferSecs, 0)} s, accepted ${b.acceptedRate === null ? 'n/a' : f(100 * b.acceptedRate, 0) + '%'})  engaged ${f(100 * b.engagedRate, 0)}%  re-vent ${f(100 * b.reventRate, 0)}%  mean venting ${f(b.meanVentSecs, 0)} s  calm ${b.rated ? f(b.meanSelfCalm, 1) + '/10 (' + b.rated + ' rated)' : 'n/a'}`)
 }
 console.log('\nCAUSAL EXCURSION EFFECT (readiness rule minus timer), WCLS')
 for (const [name, e] of Object.entries(results.effects)) {

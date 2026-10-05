@@ -1,6 +1,7 @@
 import { streamText, generateText } from 'ai'
 import { createClient } from '@/lib/supabase/server'
 import { chatModel } from '@/lib/calmer/chat-model'
+import { insertSnapshot } from '@/lib/calmer/snapshot'
 import { historyFromRows, MAX_HISTORY_MESSAGES, sanitizeHistory, type ChatTurn } from '@/lib/calmer/chat-history'
 import { createNewSession } from '@/lib/services/session'
 import { getUserMemories, formatMemoriesForPrompt, autoExtractMemoriesFromMessage } from '@/lib/services/memory'
@@ -256,7 +257,7 @@ export async function POST(req: Request) {
         ? (Date.now() - new Date(sessionRow.start_time).getTime()) / 1000
         : undefined
 
-      const { readinessScore, stressLevel, signalsUsed, usingStubSignals } = computeReadinessScore({
+      const { readinessScore, stressLevel, signalsUsed, usingStubSignals, contributions } = computeReadinessScore({
         ventingIntensities,
         ventingSessionPeak: peakRows?.[0] ? Number(peakRows[0].intensity_score) : undefined,
         biometricStressScores,
@@ -286,15 +287,19 @@ export async function POST(req: Request) {
           msg_text: userText,
           emotion_label: emotionLabel,
         }),
-        supabase.from('emotional_state').insert({
-          session_id: sessionId,
-          sentiment_score: sentiment,
-          readiness_score: readinessScore,
-          stress_level: stressLevel,
-          signals_used: signalsUsed,
-          using_stub_signals: usingStubSignals,
-          source,
-        }),
+        insertSnapshot(
+          supabase,
+          {
+            session_id: sessionId,
+            sentiment_score: sentiment,
+            readiness_score: readinessScore,
+            stress_level: stressLevel,
+            signals_used: signalsUsed,
+            using_stub_signals: usingStubSignals,
+            source,
+          },
+          contributions,
+        ),
       ])
       if (convoErr) console.error('[chat] failed to save therapist_convo user row:', convoErr.message)
       if (stateErr) console.error('[chat] failed to update emotional_state:', stateErr.message)

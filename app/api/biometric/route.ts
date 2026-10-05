@@ -5,6 +5,7 @@ import {
   computeReadinessScore,
   corroborateBiometricTransition,
 } from '@/lib/calmer/readiness'
+import { insertSnapshot } from '@/lib/calmer/snapshot'
 import { cleanRmssd, contiguousBeats, RMSSD_WINDOW_BEATS } from '@/lib/calmer/hrv-quality'
 
 export const runtime = 'nodejs'
@@ -204,7 +205,7 @@ export async function POST(req: Request) {
   )
 
   // Fuse everything this session has, not just the sensor that triggered us.
-  const { readinessScore, stressLevel, signalsUsed } = computeReadinessScore({
+  const { readinessScore, stressLevel, signalsUsed, contributions } = computeReadinessScore({
     biometricStressScores,
     ventingIntensities,
     ventingSessionPeak,
@@ -223,15 +224,19 @@ export async function POST(req: Request) {
     console.warn(`[biometric] transition NOT corroborated for session ${session.id}: ${reason}`)
   }
 
-  const { error: emotionErr } = await supabase.from('emotional_state').insert({
-    session_id: session.id,
-    biometric_reading_id: reading.id,
-    stress_level: stressLevel,
-    readiness_score: readinessScore,
-    signals_used: signalsUsed,
-    corroborated,
-    source: 'biometric',
-  })
+  const { error: emotionErr } = await insertSnapshot(
+    supabase,
+    {
+      session_id: session.id,
+      biometric_reading_id: reading.id,
+      stress_level: stressLevel,
+      readiness_score: readinessScore,
+      signals_used: signalsUsed,
+      corroborated,
+      source: 'biometric',
+    },
+    contributions,
+  )
 
   if (emotionErr) {
     console.error('[biometric] emotional_state update failed', emotionErr)
