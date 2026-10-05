@@ -1,5 +1,6 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 import { ChatSession, CategorizedSessions, ChatMessage } from '@/lib/types'
+import { dayKey, daysBetween } from '@/lib/time'
 
 // Chat history now lives in the unified schema: a `session` row (carrying
 // title/summary/mood) is one conversation, and its `therapist_convo` rows are
@@ -23,10 +24,8 @@ export async function getUserSessionsGrouped(
     return empty
   }
 
-  const now = new Date()
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000
-  const sevenDaysAgoStart = todayStart - 7 * 24 * 60 * 60 * 1000
+  // Calendar days in the app's zone (the server runs in UTC).
+  const today = dayKey(new Date())
 
   const categorized: CategorizedSessions = { today: [], yesterday: [], previous7Days: [], older: [] }
 
@@ -53,10 +52,10 @@ export async function getUserSessionsGrouped(
       chat_messages: [{ count: messageCount }],
     }
 
-    const t = new Date(row.updated_at || row.created_at).getTime()
-    if (t >= todayStart) categorized.today.push(session)
-    else if (t >= yesterdayStart) categorized.yesterday.push(session)
-    else if (t >= sevenDaysAgoStart) categorized.previous7Days.push(session)
+    const age = daysBetween(dayKey(row.updated_at || row.created_at), today)
+    if (age <= 0) categorized.today.push(session)
+    else if (age === 1) categorized.yesterday.push(session)
+    else if (age <= 7) categorized.previous7Days.push(session)
     else categorized.older.push(session)
   }
 
@@ -143,11 +142,12 @@ export async function updateSessionSummary(
   userId: string,
   sessionId: string,
   summary: string,
-  mood: string
+  mood: string | null
 ): Promise<boolean> {
+  // mood only when the classifier gave one; never overwrite a real label with nothing
   const { error } = await supabase
     .from('session')
-    .update({ summary, mood, updated_at: new Date().toISOString() })
+    .update({ summary, ...(mood ? { mood } : {}), updated_at: new Date().toISOString() })
     .eq('id', sessionId)
     .eq('user_id', userId)
 

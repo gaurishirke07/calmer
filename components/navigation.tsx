@@ -12,6 +12,9 @@ export function Navigation() {
   const pathname = usePathname()
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  // Phone menu: the page links are hidden below md, and there was no other
+  // way to reach them (or, signed in, Settings and Sign Out) on a phone.
+  const [menuOpen, setMenuOpen] = useState(false)
   const supabase = createClient()
 
   useEffect(() => {
@@ -81,13 +84,13 @@ export function Navigation() {
             <div className="h-9 w-20 animate-pulse rounded-md bg-secondary" />
           ) : user ? (
             <>
-              <Button asChild variant={pathname === '/dashboard' ? 'secondary' : 'ghost'} size="sm">
+              <Button asChild variant={pathname === '/dashboard' ? 'secondary' : 'ghost'} size="sm" className="hidden md:inline-flex">
                 <Link href="/dashboard">Dashboard</Link>
               </Button>
-              <Button asChild variant={pathname === '/settings' ? 'secondary' : 'ghost'} size="sm">
+              <Button asChild variant={pathname === '/settings' ? 'secondary' : 'ghost'} size="sm" className="hidden md:inline-flex">
                 <Link href="/settings">Settings</Link>
               </Button>
-              <Button variant="outline" size="sm" onClick={handleSignOut}>
+              <Button variant="outline" size="sm" onClick={handleSignOut} className="hidden md:inline-flex">
                 Sign Out
               </Button>
             </>
@@ -101,8 +104,49 @@ export function Navigation() {
               </Button>
             </>
           )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="md:hidden"
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={menuOpen}
+            aria-controls="mobile-menu"
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={menuOpen ? 'M6 18L18 6M6 6l12 12' : 'M4 6h16M4 12h16M4 18h16'} />
+            </svg>
+          </Button>
         </div>
       </nav>
+
+      {menuOpen && (
+        <div id="mobile-menu" className="border-t border-white/10 px-4 py-3 md:hidden">
+          <ul className="flex flex-col gap-1 text-sm">
+            {[...navLinks, ...(user ? [{ href: '/dashboard', label: 'Dashboard' }, { href: '/settings', label: 'Settings' }] : [])].map((link) => (
+              <li key={link.href}>
+                <Link
+                  href={link.href}
+                  onClick={() => setMenuOpen(false)}
+                  className={cn(
+                    'block rounded-md px-3 py-2 font-medium',
+                    pathname === link.href ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-secondary/50',
+                  )}
+                >
+                  {link.label}
+                </Link>
+              </li>
+            ))}
+            {user && (
+              <li>
+                <button type="button" onClick={handleSignOut} className="block w-full rounded-md px-3 py-2 text-left font-medium text-muted-foreground hover:bg-secondary/50">
+                  Sign Out
+                </button>
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
     </header>
   )
 }

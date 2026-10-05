@@ -34,13 +34,19 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json().catch(() => null)
-  if (!body || !body.session_id) {
-    return new Response('session_id is required', { status: 400 })
+  if (!body || typeof body.session_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.session_id)) {
+    return new Response('session_id (a UUID) is required', { status: 400 })
   }
-
-  const heartRate: number | null = body.heart_rate ?? null
-  const gripPressure: number | null = body.grip_pressure ?? null
-  const ibi: number | null = body.ibi ?? null
+  // Each reading is a finite number or absent. Anything else used to reach the
+  // database and come back as a 500.
+  const asReading = (v: unknown): number | null | undefined =>
+    v === undefined || v === null ? null : typeof v === 'number' && Number.isFinite(v) ? v : undefined
+  const heartRate = asReading(body.heart_rate)
+  const gripPressure = asReading(body.grip_pressure)
+  const ibi = asReading(body.ibi)
+  if (heartRate === undefined || gripPressure === undefined || ibi === undefined) {
+    return new Response('heart_rate, grip_pressure and ibi must be numbers or null', { status: 400 })
+  }
 
   const supabase = createServiceClient()
 
@@ -152,6 +158,9 @@ export async function POST(req: Request) {
       .select('intensity_score')
       .eq('session_id', session.id)
       .order('recorded_at', { ascending: false })
+      // rows of one flush share a timestamp: a fixed tiebreak keeps the 40-row
+      // window the same on every read instead of cutting a batch arbitrarily
+      .order('id', { ascending: false })
       // Same 40-sample window the game scores (hits + persisted idle ticks).
       .limit(40),
     supabase

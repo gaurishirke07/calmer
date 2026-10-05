@@ -47,11 +47,13 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  if (
-    // if the user is not logged in and the app path, in this case, /protected, is accessed, redirect to the login page
-    request.nextUrl.pathname.startsWith('/protected') &&
-    !user
-  ) {
+  // Signed-in areas. Each page also checks getUser() itself; this is the
+  // backstop so a new page can't be left open by accident (audit S9). The
+  // invite page /support/accept stays public: it explains how to sign in.
+  const path = request.nextUrl.pathname
+  const signedInOnly =
+    ['/dashboard', '/settings', '/chat'].some((p) => path === p || path.startsWith(`${p}/`)) || path === '/support'
+  if (signedInOnly && !user) {
     // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { capMemoriesForPrompt, extractMemory, isDuplicateMemory } from './memory-extract'
+import { capMemoriesForPrompt, extractMemory, isDuplicateMemory, isSafeToRemember } from './memory-extract'
 
 describe('extractMemory', () => {
   it('no longer saves a message just because it mentions a common word', () => {
@@ -27,6 +27,14 @@ describe('extractMemory', () => {
 
   it('caps the stored text', () => {
     expect(extractMemory('I get angry when ' + 'x'.repeat(400))!.text.length).toBe(150)
+  })
+})
+
+describe('isSafeToRemember', () => {
+  it('keeps ordinary preferences and refuses crisis language', () => {
+    expect(isSafeToRemember('Deep breathing helps me calm down')).toBe(true)
+    expect(isSafeToRemember('I sometimes want to die after exams')).toBe(false)
+    expect(isSafeToRemember('thinking about self-harm')).toBe(false)
   })
 })
 

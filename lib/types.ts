@@ -58,17 +58,23 @@ export interface SessionSummary {
   next_recommendations: string
 }
 
+// Dashboard numbers (lib/services/analytics.ts). 0..100 scales; null = no data
+// (shown as a gap or "—", never as 0).
 export interface MoodAnalyticsData {
-  weeklyMoodTrend: { day: string; anger: number; stress: number; mood: string }[]
-  monthlyMoodTrend: { week: string; anger: number; stress: number }[]
+  windowDays: number
+  weeklyMoodTrend: { day: string; date: string; negativeMood: number | null; stress: number | null }[]
+  monthlyMoodTrend: { week: string; negativeMood: number | null; stress: number | null }[]
   emotionDistribution: { emotion: string; count: number; percentage: number }[]
-  commonTriggers: { trigger: string; count: number }[]
+  recentTriggers: string[]
   totalSessions: number
-  averageAnger: number
-  averageStress: number
-  emotionalImprovement: number
+  /** From the sentiment of the user's chat messages. */
+  averageNegativeMood: number | null
+  /** Stress where each session ended. */
+  averageStress: number | null
+  /** Previous fortnight minus last fortnight (positive = sessions ending calmer). */
+  stressChange: number | null
   currentMood: EmotionType
-  mostCommonTrigger: string
+  latestTrigger: string | null
 }
 
 export interface CategorizedSessions {

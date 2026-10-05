@@ -462,7 +462,11 @@ export function AngerReleaseGame(){
     }
   },[applyHit,emit,logInteraction])
 
-  const handleMouseDown=useCallback((e:React.MouseEvent<HTMLCanvasElement>)=>{
+  // Pointer events = mouse, touch and pen through one path (the canvas was
+  // mouse-only: on a phone a drag scrolled the page). Capturing the pointer
+  // keeps a chainsaw drag going when the finger slides off the canvas edge.
+  const handleMouseDown=useCallback((e:React.PointerEvent<HTMLCanvasElement>)=>{
+    e.currentTarget.setPointerCapture?.(e.pointerId)
     mouseDown.current=true;const[cx,cy]=getXY(e);fireWeapon(cx,cy)
   },[getXY,fireWeapon])
   const handleMouseUp=useCallback(()=>{mouseDown.current=false},[])
@@ -484,7 +488,7 @@ export function AngerReleaseGame(){
       }
     }
   },[applyHit,emit,logInteraction])
-  const handleMouseMove=useCallback((e:React.MouseEvent<HTMLCanvasElement>)=>{
+  const handleMouseMove=useCallback((e:React.PointerEvent<HTMLCanvasElement>)=>{
     const[cx,cy]=getXY(e);moveTo(cx,cy)
   },[getXY,moveTo])
 
@@ -1356,24 +1360,24 @@ export function AngerReleaseGame(){
       {/* Canvas */}
       <div className="relative overflow-hidden rounded-xl border border-white/10 shadow-2xl">
         <canvas ref={canvasRef} width={W} height={H}
-          onMouseDown={handleMouseDown} onMouseUp={handleMouseUp}
-          onMouseMove={handleMouseMove} onMouseLeave={handleMouseUp}
+          onPointerDown={handleMouseDown} onPointerUp={handleMouseUp}
+          onPointerMove={handleMouseMove} onPointerLeave={handleMouseUp} onPointerCancel={handleMouseUp}
           className="w-full block"
-          style={{aspectRatio:`${W}/${H}`,cursor:'none',background:'#1a1408'}}
+          style={{aspectRatio:`${W}/${H}`,cursor:'none',background:'#1a1408',touchAction:'none'}}
         />
 
         {/* START screen */}
         {phase==='start'&&(
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/88 backdrop-blur-md">
-            <div className="text-6xl mb-3">💢</div>
-            <h2 className="mb-1 text-4xl font-black text-white tracking-tight">RAGE ROOM</h2>
-            <p className="mb-5 text-white/55 text-center max-w-md text-sm">Smash everything. Beat the buddy to a pulp. Blow it all up.<br/>Let. It. Out.</p>
-            <p className="mb-4 text-white/40 text-xs font-semibold uppercase tracking-widest">Choose Your Room</p>
-            <div className="mb-6 grid grid-cols-4 gap-3">
+          <div className="absolute inset-0 flex flex-col items-center justify-start overflow-y-auto bg-black/88 px-3 py-3 backdrop-blur-md sm:justify-center sm:py-0">
+            <div className="mb-1 text-4xl sm:mb-3 sm:text-6xl">💢</div>
+            <h2 className="mb-1 text-2xl font-black tracking-tight text-white sm:text-4xl">RAGE ROOM</h2>
+            <p className="mb-3 max-w-md text-center text-xs text-white/55 sm:mb-5 sm:text-sm">Smash everything. Beat the buddy to a pulp. Blow it all up.<br/>Let. It. Out.</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/40 sm:mb-4">Choose Your Room</p>
+            <div className="mb-3 grid grid-cols-2 gap-2 sm:mb-6 sm:grid-cols-4 sm:gap-3">
               {(Object.entries(THEMES) as [RoomTheme,Theme][]).map(([key,t])=>(
                 <button key={key} onClick={()=>startGame(key)}
-                  className="flex flex-col items-center gap-2 bg-white/8 hover:bg-white/16 border border-white/15 hover:border-white/40 rounded-xl p-4 transition-all group">
-                  <span className="text-4xl">{t.emoji}</span>
+                  className="flex flex-col items-center gap-1 bg-white/8 hover:bg-white/16 border border-white/15 hover:border-white/40 rounded-xl p-2 sm:gap-2 sm:p-4 transition-all group">
+                  <span className="text-2xl sm:text-4xl">{t.emoji}</span>
                   <span className="text-sm font-bold text-white/80 group-hover:text-white">{t.label}</span>
                 </button>
               ))}
@@ -1384,10 +1388,10 @@ export function AngerReleaseGame(){
 
         {/* ALL CLEAR */}
         {phase==='allClear'&&(
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/82 backdrop-blur-md">
-            <div className="text-6xl mb-3">🔥</div>
-            <h2 className="text-4xl font-black text-orange-400 mb-2">DESTROYED!</h2>
-            <p className="text-white/60 mb-7 text-center text-sm">Every last thing is wrecked. More?</p>
+          <div className="absolute inset-0 flex flex-col items-center justify-start overflow-y-auto bg-black/82 px-3 py-3 backdrop-blur-md sm:justify-center sm:py-0">
+            <div className="mb-1 text-4xl sm:mb-3 sm:text-6xl">🔥</div>
+            <h2 className="mb-1 text-2xl font-black text-orange-400 sm:mb-2 sm:text-4xl">DESTROYED!</h2>
+            <p className="mb-3 text-center text-sm text-white/60 sm:mb-7">Every last thing is wrecked. More?</p>
             {handoffOffer&&<div className="mb-5 w-full max-w-md px-4">{handoffOffer}</div>}
             <div className="flex gap-3 mb-4">
               <Button onClick={resetRoom} className="bg-red-600 hover:bg-red-700 text-white font-black px-8 text-base">🔄 Reset Room</Button>
@@ -1409,19 +1413,19 @@ export function AngerReleaseGame(){
 
         {/* GAME OVER */}
         {phase==='over'&&(
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/88 backdrop-blur-md">
-            <div className="text-5xl mb-3">🧹</div>
-            <h2 className="text-3xl font-black text-white mb-1">SESSION DONE</h2>
-            <p className="text-white/45 mb-7 text-sm">Feel that weight lift?</p>
+          <div className="absolute inset-0 flex flex-col items-center justify-start overflow-y-auto bg-black/88 px-3 py-3 backdrop-blur-md sm:justify-center sm:py-0">
+            <div className="mb-1 text-3xl sm:mb-3 sm:text-5xl">🧹</div>
+            <h2 className="mb-1 text-2xl font-black text-white sm:text-3xl">SESSION DONE</h2>
+            <p className="mb-3 text-sm text-white/45 sm:mb-7">Feel that weight lift?</p>
             {/* Closing feedback is about the regulation outcome and the
                 handoff — NOT about how much was destroyed. */}
-            <div className={`grid ${TRIAL_MODE?'grid-cols-1':'grid-cols-2'} gap-10 mb-8 text-center`}>
+            <div className={`grid ${TRIAL_MODE?'grid-cols-1':'grid-cols-2'} mb-4 gap-6 text-center sm:mb-8 sm:gap-10`}>
               {!TRIAL_MODE&&<div>
-                <p className="text-5xl font-black" style={{color:`hsl(${Math.round(readiness*120)},80%,60%)`}}>{Math.round(readiness*100)}%</p>
+                <p className="text-3xl font-black sm:text-5xl" style={{color:`hsl(${Math.round(readiness*120)},80%,60%)`}}>{Math.round(readiness*100)}%</p>
                 <p className="text-xs text-white/45 mt-1">CALM REACHED</p>
               </div>}
               <div>
-                <p className="text-5xl font-black text-sky-400">{MAX_VENT_SECONDS-timeLeft}s</p>
+                <p className="text-3xl font-black text-sky-400 sm:text-5xl">{MAX_VENT_SECONDS-timeLeft}s</p>
                 <p className="text-xs text-white/45 mt-1">TIME SPENT</p>
               </div>
             </div>

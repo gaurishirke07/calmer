@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { createClient as createPlainClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 
@@ -8,7 +9,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 // purges all of it. The previous version deleted rows with the user's own
 // client and left the login itself in place — the email stayed registered and
 // could still sign in — and ignored every error.
-export async function DELETE() {
+export async function DELETE(req: Request) {
   const supabase = await createClient()
   const {
     data: { user },
@@ -17,6 +18,24 @@ export async function DELETE() {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  // Re-enter the password: a live session alone (a lab PC left signed in) must
+  // not be enough to erase someone's account. Checked with a throwaway client
+  // that stores nothing, so the user's cookie session is untouched.
+  const body = await req.json().catch(() => null)
+  const password = typeof body?.password === 'string' ? body.password : ''
+  if (!password || !user.email) {
+    return NextResponse.json({ error: 'Enter your password to delete your account.' }, { status: 400 })
+  }
+  const verifier = createPlainClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+  const { error: pwError } = await verifier.auth.signInWithPassword({ email: user.email, password })
+  if (pwError) {
+    return NextResponse.json({ error: 'That password is not right.' }, { status: 403 })
+  }
+  // End only the check's own session ('global' would also revoke the user's real one).
+  await verifier.auth.signOut({ scope: 'local' }).catch(() => {})
 
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
     console.error('[user/delete] SUPABASE_SERVICE_ROLE_KEY is not set — cannot delete accounts.')

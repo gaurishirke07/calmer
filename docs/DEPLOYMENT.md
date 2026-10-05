@@ -109,19 +109,16 @@ confirmation links would point at localhost.
 
 ## 5. Migrations
 
-Run in order in the SQL editor: `001` → `014`. Already run on the current
-project: up to `012`. **Pending:**
+Run in order in the SQL editor: `001` → `015`. Already run on the live
+project: up to `014` (2026-10-05). **Pending: `015_supporter_followups.sql`**.
+It only replaces/adds functions (supporters can step back; the 3-person
+invite cap can't be raced), so run it before or after deploying, in either
+order. Until it exists the "Stop being their trusted person" button says
+"not available yet".
 
-- `013_study_integrity.sql` moves trial randomisation into the database, adds
-  the `handoff_event` log, and closes the paths that let a participant forge
-  study data. The game falls back to the old behaviour until 013 exists, so it
-  is safe either way, but the trial must not start without it.
-- `014_trusted_supporter.sql` adds the trusted-person feature
-  (`docs/TRUSTED-SUPPORTER.md`). Until it exists, the Settings card and the
-  "let them know" button simply don't appear.
-
-Both were tested on a local Postgres 18 (all 14 migrations in order, then
-behaviour as different users) before being handed over.
+Every migration is tested on a local Postgres 18 first: all of them applied
+in order to a fresh database with a Supabase-style auth shim, then the new
+behaviour exercised as owner, supporter and stranger.
 
 ## 6. Free-tier limits that matter for a study
 

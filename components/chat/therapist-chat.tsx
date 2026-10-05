@@ -8,9 +8,10 @@ import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { ChatSidebar } from './chat-sidebar'
 import { CategorizedSessions, ChatMessage } from '@/lib/types'
-import { CHAT_UNAVAILABLE_REPLY } from '@/lib/calmer/safety'
+import { CHAT_RATE_LIMITED_REPLY, CHAT_UNAVAILABLE_REPLY, CRISIS_LINE } from '@/lib/calmer/safety'
 import { MAX_MESSAGE_CHARS } from '@/lib/calmer/chat-history'
 import { ReachOutButton } from '@/components/support/reach-out-button'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 // Stored therapist_convo rows -> the UI message shape useChat renders.
 function toUIMessages(messages: ChatMessage[]) {
@@ -41,7 +42,11 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
     previous7Days: [],
     older: [],
   })
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  // Open by default on wide screens only: on a phone the 256 px sidebar took
+  // most of the screen. Once the user toggles it, their choice wins.
+  const isMobile = useIsMobile()
+  const [sidebarChoice, setSidebarChoice] = useState<boolean | null>(null)
+  const sidebarOpen = sidebarChoice ?? !isMobile
   const [isSummarizing, setIsSummarizing] = useState(false)
   const [summaryNotification, setSummaryNotification] = useState<string | null>(null)
 
@@ -196,13 +201,12 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
     setIsSummarizing(true)
     try {
       const res = await fetch(`/api/sessions/${sessionId}/summary`, { method: 'POST' })
-      if (res.ok) {
-        const data = await res.json()
-        setSummaryNotification('Session summary generated & saved!')
-        setTimeout(() => setSummaryNotification(null), 4000)
-      }
+      setSummaryNotification(res.ok ? 'Session summary generated & saved!' : 'The summary could not be saved. Please try again.')
+      setTimeout(() => setSummaryNotification(null), 4000)
     } catch (err) {
       console.error('Error summarizing session:', err)
+      setSummaryNotification('The summary could not be saved. Check your connection and try again.')
+      setTimeout(() => setSummaryNotification(null), 4000)
     } finally {
       setIsSummarizing(false)
     }
@@ -281,7 +285,9 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
+              onClick={() => setSidebarChoice(!sidebarOpen)}
+              aria-label={sidebarOpen ? 'Hide conversations' : 'Show conversations'}
+              aria-expanded={sidebarOpen}
               title="Toggle Sidebar"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -366,6 +372,13 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
                     <p className="whitespace-pre-wrap text-sm leading-relaxed">
                       {getUIMessageText(message)}
                     </p>
+                    {/* Deterministic, not left to the model: the server tags
+                        safety-mode replies (lib/calmer/safety.ts). */}
+                    {message.role === 'assistant' && (message.metadata as { crisisLine?: boolean } | undefined)?.crisisLine && (
+                      <p role="note" className="mt-3 rounded-lg border border-red-400/40 bg-red-400/10 p-2 text-xs">
+                        {CRISIS_LINE}
+                      </p>
+                    )}
                   </div>
                 </div>
               ))}
@@ -386,7 +399,10 @@ export function TherapistChat({ calmerSessionId = null }: { calmerSessionId?: st
               {error && !isStreaming && !isSubmitting && (
                 <div className="flex justify-start" role="alert">
                   <div className="max-w-[85%] rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-secondary-foreground">
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{CHAT_UNAVAILABLE_REPLY}</p>
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                      {/* The 429 body is the rate-limit text; every other failure gets the generic fail-safe. */}
+                      {error.message === CHAT_RATE_LIMITED_REPLY ? CHAT_RATE_LIMITED_REPLY : CHAT_UNAVAILABLE_REPLY}
+                    </p>
                   </div>
                 </div>
               )}

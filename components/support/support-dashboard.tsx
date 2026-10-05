@@ -14,6 +14,18 @@ interface Person {
 /** /support — the people who have made this user their trusted person. */
 export function SupportDashboard() {
   const [people, setPeople] = useState<Person[] | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  // A supporter can step back at any time (migration 015).
+  const leave = async (p: Person) => {
+    if (!confirm(`Stop being ${p.person_name}'s trusted person? You will no longer see their summary.`)) return
+    const { error } = await createClient().rpc('leave_support', { p_contact_id: p.contact_id })
+    if (error) {
+      setNotice(error.code === 'PGRST202' ? 'This option is not available yet.' : 'Could not update this. Please try again.')
+      return
+    }
+    setPeople((prev) => (prev ?? []).filter((x) => x.contact_id !== p.contact_id))
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -41,6 +53,7 @@ export function SupportDashboard() {
 
   return (
     <div className="space-y-6">
+      {notice && <p role="alert" className="text-sm text-destructive">{notice}</p>}
       {people.map((p) => (
         <Card key={p.contact_id} className="border-border/50 bg-card/50">
           <CardHeader>
@@ -49,8 +62,11 @@ export function SupportDashboard() {
               Last 14 days{p.since ? ` · you've been their trusted person since ${new Date(p.since).toLocaleDateString('en-IN')}` : ''}
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <SupporterSummaryView contactId={p.contact_id} personName={p.person_name} />
+            <button type="button" onClick={() => leave(p)} className="text-xs text-muted-foreground underline hover:text-foreground">
+              Stop being {p.person_name}&apos;s trusted person
+            </button>
           </CardContent>
         </Card>
       ))}

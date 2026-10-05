@@ -12,6 +12,8 @@ import {
   stubTextSentiment,
 } from '@/lib/calmer/readiness'
 import {
+  CHAT_RATE_LIMIT,
+  CHAT_RATE_LIMITED_REPLY,
   CHAT_UNAVAILABLE_REPLY,
   RISK_CHECK_UNAVAILABLE_INSTRUCTION,
   SAFETY_CLASSIFIER_SYSTEM,
@@ -48,6 +50,21 @@ export async function POST(req: Request) {
       typeof body?.sessionId === 'string' ? body.sessionId
       : typeof body?.calmerSessionId === 'string' ? body.calmerSessionId
       : null
+
+    // Per-user rate limit, counted from the user's own saved messages (RLS
+    // scopes therapist_convo to their sessions). Checked before any model call.
+    const countSince = async (ms: number) => {
+      const { count } = await supabase
+        .from('therapist_convo')
+        .select('id', { count: 'exact', head: true })
+        .eq('sender', 'user')
+        .gte('created_at', new Date(Date.now() - ms).toISOString())
+      return count ?? 0
+    }
+    const [lastMinute, lastHour] = await Promise.all([countSince(60_000), countSince(3_600_000)])
+    if (lastMinute >= CHAT_RATE_LIMIT.perMinute || lastHour >= CHAT_RATE_LIMIT.perHour) {
+      return new Response(CHAT_RATE_LIMITED_REPLY, { status: 429 })
+    }
 
     // Text-only user/assistant turns rebuilt server-side; the risk check below
     // reads the same text the model does (see lib/calmer/chat-history.ts).
@@ -141,6 +158,9 @@ export async function POST(req: Request) {
           .select('intensity_score, recorded_at')
           .eq('session_id', sessionId)
           .order('recorded_at', { ascending: false })
+          // rows of one flush share a timestamp: a fixed tiebreak keeps the 40-row
+          // window the same on every read instead of cutting a batch arbitrarily
+          .order('id', { ascending: false })
           // 40 = the game's own history length, so chat scores exactly the
           // venting history (hits AND persisted idle ticks) the game ended on.
           .limit(40),
@@ -172,7 +192,9 @@ export async function POST(req: Request) {
       ])
 
       if (sessionRow?.summary) {
-        previousSummaryText = `Previous Session Summary:\n${sessionRow.summary}\n`
+        // A summary of THIS conversation so far (made from the chat's
+        // "Summarize Session" button), not of a previous session.
+        previousSummaryText = `Summary of this conversation so far:\n${sessionRow.summary}\n`
       }
 
       // Log the layered-safety result (computed above) against this session.
@@ -314,6 +336,11 @@ Guidelines:
     // got no reply and no error). The client shows its own deterministic
     // fallback with the crisis line; this is the text it receives.
     return result.toUIMessageStreamResponse({
+      // Tag the reply so the client ALWAYS shows the crisis line under it in
+      // safety mode (or when the risk check couldn't run), instead of relying
+      // on the model to include it.
+      messageMetadata: ({ part }) =>
+        part.type === 'start' && (safetyMode || riskCheckUnavailable) ? { crisisLine: true } : undefined,
       onError: (err) => {
         console.error('[chat] REPLY FAILED:', (err as Error)?.message ?? err)
         return CHAT_UNAVAILABLE_REPLY

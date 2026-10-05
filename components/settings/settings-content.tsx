@@ -12,6 +12,7 @@ export function SettingsContent() {
   const [newMemoryCategory, setNewMemoryCategory] = useState<MemoryCategory>('trigger')
   const [newMemoryText, setNewMemoryText] = useState('')
   const [message, setMessage] = useState<string | null>(null)
+  const [deletePassword, setDeletePassword] = useState('')
 
   const loadMemories = async () => {
     setLoadingMemories(true)
@@ -72,23 +73,28 @@ export function SettingsContent() {
     window.open('/api/user/export', '_blank')
   }
 
-  const handleDeleteAccount = async () => {
-    if (confirm('Are you absolutely sure you want to delete your account and all associated wellness data? This action cannot be undone.')) {
-      try {
-        const res = await fetch('/api/user/delete', { method: 'DELETE' })
-        if (res.ok) {
-          window.location.href = '/'
-          return
-        }
-        // Never fail silently on the one action users must be able to trust.
-        const body = await res.json().catch(() => ({}))
-        setMessage(body.error || 'Could not delete your account. Please try again.')
-      } catch (err) {
-        console.error('Error deleting account:', err)
-        setMessage('Could not delete your account — check your connection and try again.')
+  const handleDeleteAccount = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!confirm('Delete your account and all your data? This cannot be undone.')) return
+    try {
+      const res = await fetch('/api/user/delete', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: deletePassword }),
+      })
+      if (res.ok) {
+        window.location.href = '/'
+        return
       }
+      // Never fail silently on the one action users must be able to trust.
+      const body = await res.json().catch(() => ({}))
+      setMessage(body.error || 'Could not delete your account. Please try again.')
+    } catch (err) {
+      console.error('Error deleting account:', err)
+      setMessage('Could not delete your account. Check your connection and try again.')
     }
   }
+
 
   return (
     <div className="space-y-8">
@@ -190,9 +196,22 @@ export function SettingsContent() {
           <CardDescription>Permanently remove all your account history and personal data.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Button variant="destructive" onClick={handleDeleteAccount}>
-            Delete Account & Purge Data
-          </Button>
+          {/* The password is checked on the server, so a computer left signed
+              in is not enough to erase the account. */}
+          <form onSubmit={handleDeleteAccount} className="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="password"
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+              placeholder="Your password"
+              aria-label="Your password, to confirm deletion"
+              autoComplete="current-password"
+              className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
+            />
+            <Button type="submit" variant="destructive" disabled={!deletePassword}>
+              Delete Account & Purge Data
+            </Button>
+          </form>
         </CardContent>
       </Card>
     </div>

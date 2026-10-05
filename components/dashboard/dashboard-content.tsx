@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { MoodAnalytics } from '@/components/analytics/mood-analytics'
+import type { MoodAnalyticsData } from '@/lib/types'
 import { ReachOutButton } from '@/components/support/reach-out-button'
 import { SupportingLink } from '@/components/support/supporting-link'
 
@@ -29,10 +30,8 @@ interface DashboardContentProps {
   stats: {
     totalChatSessions: number
     currentMood: string
-    avgAnger: number
-    avgStress: number
-    mostCommonTrigger: string
   }
+  analytics: MoodAnalyticsData
 }
 
 export function DashboardContent({
@@ -40,6 +39,7 @@ export function DashboardContent({
   gameSessions,
   chatSessions,
   stats,
+  analytics,
 }: DashboardContentProps) {
   const formatDate = (dateString: string) => {
     // Fixed zone: this renders on the server (UTC on Vercel) and again in the
@@ -102,28 +102,28 @@ export function DashboardContent({
 
         <Card className="border-border/50 bg-card/50">
           <CardHeader className="pb-2">
-            <CardDescription>Average Anger</CardDescription>
+            <CardDescription>Negative mood in chat</CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold text-accent">{stats.avgAnger}%</p>
+            <p className="text-3xl font-bold text-accent">{analytics.averageNegativeMood === null ? '—' : `${analytics.averageNegativeMood}%`}</p>
           </CardContent>
         </Card>
 
         <Card className="border-border/50 bg-card/50">
           <CardHeader className="pb-2">
-            <CardDescription>Average Stress</CardDescription>
+            <CardDescription>Stress at session end</CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold text-amber-400">{stats.avgStress}%</p>
+            <p className="text-3xl font-bold text-amber-400">{analytics.averageStress === null ? '—' : `${analytics.averageStress}%`}</p>
           </CardContent>
         </Card>
 
         <Card className="border-border/50 bg-card/50">
           <CardHeader className="pb-2">
-            <CardDescription>Most Common Trigger</CardDescription>
+            <CardDescription>Latest trigger noted</CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-sm font-bold text-foreground truncate">{stats.mostCommonTrigger}</p>
+            <p className="text-sm font-bold text-foreground truncate">{analytics.latestTrigger ?? 'None yet'}</p>
           </CardContent>
         </Card>
       </div>
@@ -131,7 +131,7 @@ export function DashboardContent({
       {/* Mood Analytics Charts */}
       <div>
         <h2 className="text-2xl font-bold tracking-tight mb-4">Mood Analytics</h2>
-        <MoodAnalytics />
+        <MoodAnalytics data={analytics} />
       </div>
 
       {/* Recent Activity */}

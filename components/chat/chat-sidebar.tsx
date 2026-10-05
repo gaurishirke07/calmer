@@ -41,7 +41,9 @@ export function ChatSidebar({
 
   const handleDelete = async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (confirm('Are you sure you want to delete this chat session?')) {
+    // The session is shared by the chat AND the rage-room round it came from,
+    // so deleting it removes both (and its study records). Say so.
+    if (confirm('Delete this session? Its chat, and any rage-room data recorded with it, will be permanently removed.')) {
       await onDeleteSession(sessionId)
     }
   }
@@ -62,9 +64,8 @@ export function ChatSidebar({
             return (
               <div
                 key={session.id}
-                onClick={() => onSelectSession(session.id)}
                 className={cn(
-                  'group flex items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-all cursor-pointer',
+                  'group flex items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-all',
                   isActive
                     ? 'bg-primary/20 text-primary font-medium border border-primary/30'
                     : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
@@ -79,27 +80,38 @@ export function ChatSidebar({
                     <input
                       type="text"
                       value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
+                      onChange={(e) => setEditTitle(e.target.value.slice(0, 100))}
+                      aria-label="New name for this conversation"
                       autoFocus
                       className="w-full rounded bg-background px-2 py-1 text-xs border border-primary focus:outline-none"
                     />
-                    <button type="submit" className="text-xs text-primary font-bold px-1">
+                    <button type="submit" aria-label="Save name" className="text-xs text-primary font-bold px-1">
                       ✓
                     </button>
                   </form>
                 ) : (
                   <>
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <svg className="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    {/* A real button: rows used to be click-only divs that a
+                        keyboard couldn't reach. */}
+                    <button
+                      type="button"
+                      onClick={() => onSelectSession(session.id)}
+                      aria-current={isActive ? 'true' : undefined}
+                      className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left focus:outline-none"
+                    >
+                      <svg className="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                       </svg>
                       <span className="truncate">{session.title || 'New Conversation'}</span>
-                    </div>
+                    </button>
 
-                    <div className="hidden group-hover:flex items-center gap-1 shrink-0">
+                    {/* Always shown on phones (no hover there); on larger
+                        screens on hover or keyboard focus. */}
+                    <div className="flex shrink-0 items-center gap-1 md:hidden md:group-hover:flex md:group-focus-within:flex">
                       <button
                         onClick={(e) => handleStartRename(session, e)}
                         title="Rename Chat"
+                        aria-label={`Rename ${session.title || 'conversation'}`}
                         className="rounded p-1 hover:bg-background/80 text-muted-foreground hover:text-foreground"
                       >
                         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -109,6 +121,7 @@ export function ChatSidebar({
                       <button
                         onClick={(e) => handleDelete(session.id, e)}
                         title="Delete Chat"
+                        aria-label={`Delete ${session.title || 'conversation'}`}
                         className="rounded p-1 hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
                       >
                         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

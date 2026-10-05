@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getUserMemories, saveUserMemory, deleteUserMemory } from '@/lib/services/memory'
+import { MAX_MEMORY_CHARS, isSafeToRemember } from '@/lib/calmer/memory-extract'
+import type { MemoryCategory } from '@/lib/types'
+
+const MEMORY_CATEGORIES: MemoryCategory[] = ['trigger', 'relaxation', 'goal', 'stress_work', 'stress_family', 'stress_exam', 'hobby', 'other']
 
 export async function GET() {
   try {
@@ -29,12 +33,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { category, memory_text } = await req.json()
-    if (!category || !memory_text) {
-      return NextResponse.json({ error: 'category and memory_text are required' }, { status: 400 })
+    const body = await req.json().catch(() => null)
+    const category = body?.category
+    const text = typeof body?.memory_text === 'string' ? body.memory_text.trim() : ''
+    if (!MEMORY_CATEGORIES.includes(category) || !text) {
+      return NextResponse.json({ error: 'A category and some text are required' }, { status: 400 })
+    }
+    if (text.length > MAX_MEMORY_CHARS) {
+      return NextResponse.json({ error: `Keep memories under ${MAX_MEMORY_CHARS} characters` }, { status: 400 })
+    }
+    // Memories are replayed into every future chat prompt: crisis language is
+    // handled in the chat itself, with the safety pathway, never stored here.
+    if (!isSafeToRemember(text)) {
+      return NextResponse.json(
+        { error: "That can't be saved as a memory. If you're struggling, the chat can help right now, or call Tele-MANAS at 14416." },
+        { status: 400 },
+      )
     }
 
-    const memory = await saveUserMemory(supabase, user.id, category, memory_text)
+    const memory = await saveUserMemory(supabase, user.id, category, text)
     if (!memory) {
       return NextResponse.json({ error: 'Failed to save memory' }, { status: 500 })
     }

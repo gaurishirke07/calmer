@@ -12,8 +12,16 @@
 // a moving hand, does all three of: drops out (null heart rate), misreads
 // outside 40–180 bpm, and jumps >20 bpm between readings. Any one of those, in an
 // untagged session, marks it as board data.
-export function biometricProvenance(rows) {
+//
+// Since 2026-10-05 the simulator and the Fig. 3 generator register as the
+// device labelled 'simulator', so their rows are tagged too. Pass that
+// device's id(s) as `simulatorDeviceIds`; without it a tagged simulator run
+// would read as board data.
+export const SIMULATOR_LABEL = 'simulator'
+
+export function biometricProvenance(rows, simulatorDeviceIds = new Set()) {
   if (!rows?.length) return 'none'
+  if (rows.some((r) => r.device_id && simulatorDeviceIds.has(r.device_id))) return 'simulator-tagged'
   if (rows.some((r) => r.device_id)) return 'board-tagged'
   const hr = rows.map((r) => r.heart_rate)
   const dropout = hr.some((h) => h === null)

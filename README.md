@@ -49,7 +49,7 @@ Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/
    ```
    `.env.local` is gitignored — never commit real keys, especially `SUPABASE_SERVICE_ROLE_KEY`. Do **not** leave placeholder duplicates in the file; dotenv keeps the last value.
 
-3. **Database** — run all fourteen migrations **in numeric order** in the Supabase SQL editor:
+3. **Database** — run all fifteen migrations **in numeric order** in the Supabase SQL editor:
    ```
    001_create_calmer_tables.sql          # original tables
    002_upgrade_calmer_schema.sql         # user_memories + mood logs
@@ -65,6 +65,7 @@ Next.js 16 (App Router) · React 19 · TypeScript (strict) · Tailwind + shadcn/
    012_drop_session_current_state_view.sql  # SECURITY: drop a view that bypassed RLS
    013_study_integrity.sql               # DB-drawn trial arm, offer log, sensor rows via the API only
    014_trusted_supporter.sql             # trusted person: aggregates-only view, user-sent alerts
+   015_supporter_followups.sql           # supporters can step back; invite cap made race-proof
    ```
    Then confirm RLS: as user A you must not be able to read user B's `session` rows.
 
@@ -123,6 +124,16 @@ service-role key; outputs are gitignored). Run with `node --no-warnings scripts/
 
 Import the GitHub repo into Vercel and set the environment variables from `.env.example` in the project settings (`SUPABASE_SERVICE_ROLE_KEY` server-only). Next.js is auto-detected; no extra config needed. Pushes to `main` redeploy only if the Vercel project is connected to the repo; migrations, environment variables and Supabase auth settings are never deployed by a push. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for ownership, Supabase settings, free-tier limits and a post-deploy smoke test.
 
+## Documentation
+
+| doc | for |
+|---|---|
+| [docs/FEATURES.md](docs/FEATURES.md) | what CALMER does, ranked for presentations, with a demo script and honest limits |
+| [docs/TEST-PLAN.md](docs/TEST-PLAN.md) | everything to verify before a demo or the study, with status |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Vercel, Supabase settings, migrations, free-tier limits, smoke test |
+| [docs/TRUSTED-SUPPORTER.md](docs/TRUSTED-SUPPORTER.md) | design of the trusted-person feature |
+| [hardware/TESTING.md](hardware/TESTING.md) | running the sensor with or without the board |
+
 ## Project structure
 
 ```
@@ -131,6 +142,6 @@ components/     game/ (rage room), chat/, dashboard/, analytics/, ui/ (shadcn)
 lib/calmer/     readiness fusion + emotion classifier (the research core)
 lib/supabase/   client / server / service-role clients
 lib/services/   memory, analytics, session helpers
-scripts/        SQL migrations (run 001 → 014 in order) + research scripts
+scripts/        SQL migrations (run 001 → 015 in order) + research scripts
 hardware/       Arduino sketch + serial bridge
 ```

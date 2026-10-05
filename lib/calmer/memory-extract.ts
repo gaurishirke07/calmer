@@ -55,6 +55,17 @@ const RULES: { category: MemoryCategory; test: (t: string) => boolean }[] = [
 const NEVER_REMEMBER =
   /\b(die|died|dying|dead|death|kill(ed|ing)?|suicid\w*|self[- ]?harm|harm(ing)? myself|hurt(ing)? myself|cut(ting)? myself|better off without|end (it|it all|my life|things)|not be here|disappear)\b/
 
+export const MAX_MEMORY_CHARS = 300
+
+/**
+ * Whether a manually added memory may be stored. Memories are replayed into
+ * every future chat prompt, so crisis language never goes in (the chat route
+ * handles that content in the moment, with the safety pathway).
+ */
+export function isSafeToRemember(text: string): boolean {
+  return !detectSafetyTrigger(text).triggered && !NEVER_REMEMBER.test(text.toLowerCase())
+}
+
 /** The memory worth keeping from this message, or null. Never from crisis language. */
 export function extractMemory(text: string | undefined): { category: MemoryCategory; text: string } | null {
   if (!text || typeof text !== 'string') return null

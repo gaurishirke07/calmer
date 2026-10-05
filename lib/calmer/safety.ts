@@ -47,6 +47,12 @@ export const SAFETY_MODE_SYSTEM = `The user may be in crisis. This is a safety-c
 // limit, or an unparseable verdict).
 export const RISK_CHECK_UNAVAILABLE_INSTRUCTION = `IMPORTANT: the automatic safety check could not run for this message, so you cannot rule out risk. Whatever the user said, end your reply with this exact line on its own: "${CRISIS_LINE}"`
 
+// Per-user chat limit (each message costs two Groq calls on a shared free-tier
+// key; one account flooding it would push everyone onto the degraded safety
+// path). Generous for a person typing; it only stops scripts and loops.
+export const CHAT_RATE_LIMIT = { perMinute: 8, perHour: 120 }
+export const CHAT_RATE_LIMITED_REPLY = `You're sending messages faster than I can keep up with. Please wait a moment and try again. If you're struggling right now: ${CRISIS_LINE}`
+
 // Shown by the client when a reply fails entirely (provider down, model
 // retired, network). Deterministic — no model involved — so it still works in
 // exactly the situation where everything else has failed.

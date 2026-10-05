@@ -48,8 +48,9 @@ export async function PATCH(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { title } = await req.json()
-    if (!title || typeof title !== 'string') {
+    const body = await req.json().catch(() => null)
+    const title = typeof body?.title === 'string' ? body.title.trim().slice(0, 100) : ''
+    if (!title) {
       return NextResponse.json({ error: 'Title string is required' }, { status: 400 })
     }
 

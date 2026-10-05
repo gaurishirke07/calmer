@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json().catch(() => ({}))
-    const title = body.title || 'New Conversation'
+    const title = (typeof body.title === 'string' && body.title.trim().slice(0, 100)) || 'New Conversation'
 
     const session = await createNewSession(supabase, user.id, title)
     if (!session) {

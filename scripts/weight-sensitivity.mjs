@@ -87,7 +87,8 @@ async function all(path) {
   }
 }
 
-const [sessions, ventRows, bioRows, stateRows] = await Promise.all([
+const [simDevices, sessions, ventRows, bioRows, stateRows] = await Promise.all([
+  all('hardware_device?select=id&device_label=eq.simulator&order=id.asc'),
   all('session?select=id,start_time,mrt_condition&order=start_time.asc,id.asc'),
   all('venting_interaction?select=session_id,input_type,intensity_score,recorded_at&order=recorded_at.asc,id.asc'),
   all('biometric_reading?select=session_id,device_id,heart_rate,grip_pressure,recorded_at&order=recorded_at.asc,id.asc'),
@@ -310,7 +311,8 @@ const ablation = KEYS.map((k) => {
 // ── provenance, validation, Fig. 3 check ─────────────────────────────────────
 // By signature, not just the device tag — older board sessions carry no
 // device_id (see scripts/provenance.mjs).
-const provenance = Object.fromEntries(sessions.map((s) => [s.id, biometricProvenance(B[s.id] ?? [])]))
+const simulatorIds = new Set(simDevices.map((d) => d.id))
+const provenance = Object.fromEntries(sessions.map((s) => [s.id, biometricProvenance(B[s.id] ?? [], simulatorIds)]))
 const byProvenance = {}
 for (const p of sensitive) byProvenance[provenance[p.session]] = (byProvenance[provenance[p.session]] ?? 0) + 1
 

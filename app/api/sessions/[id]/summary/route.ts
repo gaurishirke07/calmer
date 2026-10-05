@@ -33,21 +33,24 @@ export async function POST(
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
-    const mood = (lastUserMsg?.emotion_label as string) || 'neutral'
+    const mood = (lastUserMsg?.emotion_label as string | null) ?? null
 
-    const conversation = messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join('\n')
+    // Keep the NEWEST part of a long conversation (slicing from the start
+    // summarised how the chat began and dropped where it ended up).
+    const full = messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join('\n')
+    const conversation = full.length > 6000 ? `(earlier messages omitted)\n${full.slice(-6000)}` : full
 
     // Real, grounded summary via the same model as the chat — no fabricated
     // triggers/techniques. Falls back to a factual one-liner if the model is
     // unavailable.
-    let summaryText = `A ${messages.length}-message conversation. Latest emotional read: ${mood}.`
+    let summaryText = `A ${messages.length}-message conversation.${mood ? ` Latest emotional read: ${mood}.` : ''}`
     if (process.env.GROQ_API_KEY) {
       try {
         const { text } = await generateText({
           model: chatModel(),
           system:
             'Summarize this supportive conversation in 3-4 short sentences: what the user was feeling, what was discussed, and any coping ideas that came up. Be factual and grounded strictly in the conversation — never invent details.',
-          prompt: conversation.slice(0, 6000),
+          prompt: conversation,
         })
         if (text?.trim()) summaryText = text.trim()
       } catch (e) {
@@ -55,7 +58,11 @@ export async function POST(
       }
     }
 
-    await updateSessionSummary(supabase, user.id, sessionId, summaryText, mood)
+    // Report a failed save instead of claiming success.
+    const saved = await updateSessionSummary(supabase, user.id, sessionId, summaryText, mood)
+    if (!saved) {
+      return NextResponse.json({ error: 'The summary could not be saved. Please try again.' }, { status: 500 })
+    }
 
     return NextResponse.json({ success: true, summary: summaryText, mood })
   } catch (error) {

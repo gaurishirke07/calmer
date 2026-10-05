@@ -83,7 +83,7 @@ async function bioTick(sid, r) {
   const res = await fetch(API + '/api/biometric', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-hardware-secret': SECRET },
-    body: JSON.stringify({ session_id: sid, grip_pressure: r.grip, heart_rate: r.hr, ibi: r.ibi }),
+    body: JSON.stringify({ session_id: sid, grip_pressure: r.grip, heart_rate: r.hr, ibi: r.ibi, device_label: 'simulator' }),
   })
   if (!res.ok) throw new Error('biometric ingest failed: ' + res.status + ' ' + (await res.text()))
   return res.json()

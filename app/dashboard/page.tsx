@@ -33,13 +33,15 @@ export default async function DashboardPage() {
       .neq('venting_interaction.input_type', 'idle')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
-      .limit(20),
+      // Filtered below to sessions with venting / chat; a short limit let a
+      // run of one kind push every session of the other kind off the page.
+      .limit(100),
     supabase
       .from('session')
       .select('id, title, mood, created_at, updated_at, therapist_convo(count)')
       .eq('user_id', user.id)
       .order('updated_at', { ascending: false })
-      .limit(20),
+      .limit(100),
     getUserMoodAnalytics(supabase, user.id),
   ])
 
@@ -85,10 +87,8 @@ export default async function DashboardPage() {
             stats={{
               totalChatSessions,
               currentMood: analytics.currentMood,
-              avgAnger: analytics.averageAnger,
-              avgStress: analytics.averageStress,
-              mostCommonTrigger: analytics.mostCommonTrigger,
             }}
+            analytics={analytics}
           />
         </div>
       </section>

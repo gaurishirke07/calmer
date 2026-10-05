@@ -53,8 +53,9 @@ function oldStress(hr, gp) {
 const cls = (s) => (s === null ? null : s >= 0.66 ? 'high' : s >= 0.33 ? 'moderate' : 'low')
 const ms = (s) => new Date(s).getTime()
 
-const [sessions, bio, vent, states] = await Promise.all([
-  all('session?select=id,start_time'),
+const [simDevices, sessions, bio, vent, states] = await Promise.all([
+  all('hardware_device?select=id&device_label=eq.simulator&order=id.asc'),
+  all('session?select=id,start_time&order=id.asc'),
   all('biometric_reading?select=session_id,device_id,heart_rate,grip_pressure,ibi,rmssd,recorded_at&order=recorded_at.asc,id.asc'),
   all('venting_interaction?select=session_id,input_type,intensity_score,recorded_at&order=recorded_at.asc,id.asc'),
   all('emotional_state?select=session_id,source,readiness_score,sentiment_score,recorded_at&order=recorded_at.asc,id.asc'),
@@ -66,7 +67,8 @@ const E = group(states)
 const start = Object.fromEntries(sessions.map((s) => [s.id, ms(s.start_time)]))
 // Provenance by signature, not just the device tag: board sessions recorded with an
 // older bridge carry no device_id (see scripts/provenance.mjs).
-const prov = Object.fromEntries(Object.entries(B).map(([sid, rows]) => [sid, biometricProvenance(rows)]))
+const simulatorIds = new Set(simDevices.map((d) => d.id))
+const prov = Object.fromEntries(Object.entries(B).map(([sid, rows]) => [sid, biometricProvenance(rows, simulatorIds)]))
 const sourceOf = (sid) => (prov[sid]?.startsWith('board') ? 'real' : 'simulated')
 
 // ── per-reading: heart-rate gate, stress, RMSSD ──────────────────────────────

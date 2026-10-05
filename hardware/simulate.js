@@ -60,7 +60,9 @@ function reading(i) {
   const baseIbi = Math.round(60000 / hr)
   const jitter = Math.round((5 + t * 45) * (Math.random() * 2 - 1))
   const ibi = baseIbi + jitter
-  return { session_id: SESSION_ID, heart_rate: hr, grip_pressure: grip, ibi }
+  // device_label tags these rows as simulated (scripts/provenance.mjs), so a
+  // simulator run can never be counted as real board data.
+  return { session_id: SESSION_ID, heart_rate: hr, grip_pressure: grip, ibi, device_label: 'simulator' }
 }
 
 async function send(payload) {
